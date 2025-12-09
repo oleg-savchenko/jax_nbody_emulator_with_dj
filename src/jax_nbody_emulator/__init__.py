@@ -1,6 +1,20 @@
 """
 N-Body Emulator: A JAX-based neural network emulator for cosmological simulations.
 
+This package provides two inference modes:
+
+**Preprocessed Mode (Fast):**
+- Preprocess parameters once per cosmology: `modulate_emulator_parameters()`
+- Run inference many times: `NBodyEmulator` or `NBodyEmulatorVel`
+- Use: `SubboxProcessor` or `SubboxProcessorVel`
+- Best for: Processing many boxes with same (Om, z)
+
+**Style Mode (Flexible):**
+- Pass (Om, Dz) as inputs to each forward pass
+- Models: `StyleNBodyEmulator` or `StyleNBodyEmulatorVel`
+- Use: `StyleSubboxProcessor` or `StyleSubboxProcessorVel`
+- Best for: Varying cosmology per box
+
 Copyright (C) 2025 Drew Jamieson
 Licensed under GNU GPL v3.0 - see LICENSE file for details.
 
@@ -11,7 +25,6 @@ from importlib import resources
 import numpy as np
 import jax.numpy as jnp
 import jax
-
 
 def load_default_parameters(dtype=jnp.float32):
     """
@@ -72,37 +85,41 @@ def load_default_parameters(dtype=jnp.float32):
     
     return data
 
-
-
+# Cosmology
 from .cosmology import D, H, f, dlogH_dloga, vel_norm, acc_norm
-from .style_layers import (
-    StyleBase3D,
-    StyleConv3D,
-    StyleSkip3D,
-    StyleDownSample3D,
-    StyleUpSample3D,
-    LeakyReLUStyled,
-)
-from .style_blocks import (
-    StyleResampleBlock3D,
-    StyleResNetBlock3D,
-)
-from .nbody_emulator import NBodyEmulator
-from .style_layers_vel import (
-    StyleBase3DVel,
-    StyleConv3DVel,
-    StyleSkip3DVel,
-    StyleDownSample3DVel,
-    StyleUpSample3DVel,
-    LeakyReLUStyledVel,
-)
-from .style_blocks_vel import (
-    StyleResampleBlock3DVel,
-    StyleResNetBlock3DVel,
-)
-from .nbody_emulator_vel import NBodyEmulatorVel
-from .subbox import SubboxConfig, SubboxProcessor, SubboxProcessorVel
 
+# Preprocessing functions
+from .nbody_emulator import modulate_emulator_parameters
+from .nbody_emulator_vel import modulate_emulator_parameters_vel
+
+# Preprocessed models (no style)
+from .layers import ConvBase3D, Conv3D, Skip3D, DownSample3D, UpSample3D, LeakyReLU
+from .blocks import ResampleBlock3D, ResNetBlock3D
+from .nbody_emulator import NBodyEmulator
+
+# Preprocessed models with velocity
+from .layers_vel import ConvBase3DVel, Conv3DVel, Skip3DVel, DownSample3DVel, UpSample3DVel, LeakyReLUVel
+from .blocks_vel import ResampleBlock3DVel, ResNetBlock3DVel
+from .nbody_emulator_vel import NBodyEmulatorVel
+
+# Style models (Om, Dz inputs)
+from .style_layers import StyleConvBase3D, StyleConv3D, StyleSkip3D, StyleDownSample3D, StyleUpSample3D
+from .style_blocks import StyleResampleBlock3D, StyleResNetBlock3D
+from .style_nbody_emulator import StyleNBodyEmulator
+
+# Style models with velocity
+from .style_layers_vel import StyleConvBase3DVel, StyleConv3DVel, StyleSkip3DVel, StyleDownSample3DVel, StyleUpSample3DVel
+from .style_blocks_vel import StyleResampleBlock3DVel, StyleResNetBlock3DVel
+from .style_nbody_emulator_vel import StyleNBodyEmulatorVel
+
+# Subbox processing
+from .subbox import (
+    SubboxConfig,
+    SubboxProcessor,
+    SubboxProcessorVel,
+    StyleSubboxProcessor,
+    StyleSubboxProcessorVel
+)
 
 __version__ = "0.1.0"
 __author__ = "Drew Jamieson"
@@ -114,35 +131,60 @@ __all__ = [
     "H", 
     "f",
     "dlogH_dloga",
-    "growth_acc",
     "vel_norm",
     "acc_norm",
+    # Layers
+    "ConvBase3D",
+    "Conv3D",
+    "Skip3D", 
+    "DownSample3D",
+    "UpSample3D",
+    "LeakyReLU",
+    # Blocks
+    "ResampleBlock3D",
+    "ResNetBlock3D",
+    # Emulator
+    "modulate_emulator_parameters",
+    "NBodyEmulator",
+    # Layers with velocity
+    "ConvBase3DVel",
+    "Conv3DVel",
+    "Skip3DVel", 
+    "DownSample3DVel",
+    "UpSample3DVel",
+    "LeakyReLUVel",
+    # Blocks with velocity
+    "ResampleBlock3DVel",
+    "ResNetBlock3DVel",
+    # Emulator with velocity
+    "modulate_emulator_parameters_vel",
+    "NBodyEmulatorVel",
     # Style layers
-    "StyleBase3D",
+    "StyleConvBase3D",
     "StyleConv3D",
     "StyleSkip3D", 
     "StyleDownSample3D",
     "StyleUpSample3D",
-    "LeakyReLUStyled",
     # Style blocks
     "StyleResampleBlock3D",
     "StyleResNetBlock3D",
-    # Main model
-    "NBodyEmulator",
+    # Style emulator
+    "StyleNBodyEmulator",
     # Style layers with velocity
-    "StyleBase3DVel",
+    "StyleConvBase3DVel",
     "StyleConv3DVel",
     "StyleSkip3DVel", 
     "StyleDownSample3DVel",
     "StyleUpSample3DVel",
-    "LeakyReLUStyledVel",
-    # Style blocks
+    # Style blocks with velocity
     "StyleResampleBlock3DVel",
     "StyleResNetBlock3DVel",
-    # Main model
-    "NBodyEmulatorVel",
+    # Emulator with velocity
+    "StyleNBodyEmulatorVel",
     # Subbox processors
     "SubboxConfig",
     "SubboxProcessor",
-    "SubboxProcessorVel"
+    "StyleSubboxProcessor",
+    "SubboxProcessorVel",
+    "StyleSubboxProcessorVel"
 ]

@@ -15,12 +15,13 @@ import jax
 import jax.numpy as jnp
 import flax.linen as nn
 
+from .layers import LeakyReLU
+
 from .style_layers import (
     StyleConv3D,
     StyleSkip3D,
     StyleUpSample3D,
     StyleDownSample3D,
-    LeakyReLUStyled,
 )
 
 class StyleResampleBlock3D(nn.Module):
@@ -73,7 +74,7 @@ class StyleResampleBlock3D(nn.Module):
                 conv_idx += 1
                 
             elif layer_type == 'A':
-                layer = LeakyReLUStyled(name=f'act_{act_idx}', dtype=self.dtype)
+                layer = LeakyReLU(name=f'act_{act_idx}', dtype=self.dtype)
                 x = layer(x, s)
                 act_idx += 1
                 
@@ -144,7 +145,7 @@ class StyleResNetBlock3D(nn.Module):
                 conv_idx += 1
                 
             elif layer_type == 'A':
-                layer = LeakyReLUStyled(name=f'act_{act_idx}', dtype=self.dtype)
+                layer = LeakyReLU(name=f'act_{act_idx}', dtype=self.dtype)
                 x = layer(x, s)
                 act_idx += 1
                 
@@ -159,7 +160,7 @@ class StyleResNetBlock3D(nn.Module):
         
         # Optional final activation
         if last_act:
-            act = LeakyReLUStyled(name='final_act', dtype=self.dtype)
+            act = LeakyReLU(name='final_act', dtype=self.dtype)
             x = act(x, s)
         
         return x

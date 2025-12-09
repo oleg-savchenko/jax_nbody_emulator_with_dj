@@ -2,7 +2,7 @@
 Main N-body emulator model implementation.
 
 This module contains the primary NBodyEmulator class that implements
-a 3D U-Net-like architecture with style conditioning for cosmological
+a 3D U-Net-like architecture for cosmological
 N-body simulations.
 
 Copyright (C) 2025 Drew Jamieson
@@ -15,24 +15,76 @@ import jax
 import jax.numpy as jnp
 import flax.linen as nn
 
-from .style_blocks import StyleResNetBlock3D, StyleResampleBlock3D
+from .blocks import ResNetBlock3D, ResampleBlock3D
+
+def _modulate_weights(style_weight, style_bias, weight, s, eps = 1.e-8) :
+
+        if s.ndim == 1:
+            s = s[None]
+        
+        s_mod = jnp.dot(s, style_weight.T) + style_bias
+        # s_mod: (B, C_in) -> (B, 1, C_in, 1, 1, 1)
+        s_mod = s_mod[:, None, :, None, None, None]
+        
+        # w: (C_out, C_in, K, K, K) -> (B, C_out, C_in, K, K, K)
+        w = weight[None] * s_mod
+        
+        # Demodulation (normalize over spatial + input channels)
+        norm = jnp.sqrt(jnp.sum(w**2, axis=(2,3,4,5), keepdims=True) + eps)
+        
+        w_normalized = w / norm
+        
+        return w_normalized
+    
+    
+def modulate_emulator_parameters(params, z, Om, eps = 1.e-8):
+    """
+    Preprocess all network parameters for fixed (z, Om).
+    
+    Returns new params dict with modulated weights.
+    """
+    # Compute style vector
+    s0 = (Om - 0.3) * 5.
+    s1 = D(jnp.array([z]), jnp.array([Om]))[0] - 1.
+    s = jnp.array([[s0, s1]])
+    
+    # Process each block
+    processed_params = {}
+    for block_name, block_params in params.items():
+        processed_params[block_name] = {}
+        for layer_name, layer_params in block_params.items():
+            if 'style_weight' in layer_params:
+                # This layer has style modulation - preprocess it
+                w_norm = _modulate_weights(
+                    layer_params['style_weight'],
+                    layer_params['style_bias'],
+                    layer_params['weight'],
+                    s,
+                    eps=eps
+                )
+                processed_params[block_name][layer_name] = {
+                    'weight': w_norm[0],  # Remove batch dim
+                    'bias': layer_params['bias']
+                }
+            else:
+                # Pass through unmodified
+                processed_params[block_name][layer_name] = layer_params
+    
+    return processed_params
 
 class NBodyEmulator(nn.Module):
     """
-    3D U-Net-like neural network with style conditioning for N-body simulations.
+    3D U-Net-like neural network for N-body simulations.
     
     Processes 3D volumetric data through encoder-bottleneck-decoder architecture
-    with skip connections. Network behavior is conditioned by cosmological
-    parameters (Om and Dz).
+    with skip connections.
     
     Attributes:
-        style_size: Dimensionality of style vector (default: 2 for Om, Dz)
         in_chan: Number of input channels
         out_chan: Number of output channels
         mid_chan: Number of channels in intermediate layers
         eps: Small constant for numerical stability
     """
-    style_size: int = 2
     in_chan: int = 3
     out_chan: int = 3
     mid_chan: int = 64
@@ -45,131 +97,125 @@ class NBodyEmulator(nn.Module):
         mid_chan_2 = 2 * mid_chan_1  # For concatenation with skip connections
         
         # Encoder Path (Downsampling)
-        self.conv_l00 = StyleResNetBlock3D(
-            'CACA', self.style_size, self.in_chan, mid_chan_1, eps=self.eps, dtype=self.dtype
+        self.conv_l00 = ResNetBlock3D(
+            'CACA', self.in_chan, mid_chan_1, eps=self.eps, dtype=self.dtype
         )
-        self.conv_l01 = StyleResNetBlock3D(
-            'CACA', self.style_size, mid_chan_1, mid_chan_1, eps=self.eps, dtype=self.dtype
+        self.conv_l01 = ResNetBlock3D(
+            'CACA', mid_chan_1, mid_chan_1, eps=self.eps, dtype=self.dtype
         )
-        self.down_l0 = StyleResampleBlock3D(
-            'DA', self.style_size, mid_chan_1, mid_chan_1, eps=self.eps, dtype=self.dtype
-        )
-        
-        self.conv_l1 = StyleResNetBlock3D(
-            'CACA', self.style_size, mid_chan_1, mid_chan_1, eps=self.eps, dtype=self.dtype
-        )
-        self.down_l1 = StyleResampleBlock3D(
-            'DA', self.style_size, mid_chan_1, mid_chan_1, eps=self.eps, dtype=self.dtype
+        self.down_l0 = ResampleBlock3D(
+            'DA', mid_chan_1, mid_chan_1, eps=self.eps, dtype=self.dtype
         )
         
-        self.conv_l2 = StyleResNetBlock3D(
-            'CACA', self.style_size, mid_chan_1, mid_chan_1, eps=self.eps, dtype=self.dtype
+        self.conv_l1 = ResNetBlock3D(
+            'CACA', mid_chan_1, mid_chan_1, eps=self.eps, dtype=self.dtype
         )
-        self.down_l2 = StyleResampleBlock3D(
-            'DA', self.style_size, mid_chan_1, mid_chan_1, eps=self.eps, dtype=self.dtype
+        self.down_l1 = ResampleBlock3D(
+            'DA', mid_chan_1, mid_chan_1, eps=self.eps, dtype=self.dtype
+        )
+        
+        self.conv_l2 = ResNetBlock3D(
+            'CACA', mid_chan_1, mid_chan_1, eps=self.eps, dtype=self.dtype
+        )
+        self.down_l2 = ResampleBlock3D(
+            'DA', mid_chan_1, mid_chan_1, eps=self.eps, dtype=self.dtype
         )
         
         # Bottleneck
-        self.conv_c = StyleResNetBlock3D(
-            'CACA', self.style_size, mid_chan_1, mid_chan_1, eps=self.eps, dtype=self.dtype
+        self.conv_c = ResNetBlock3D(
+            'CACA', mid_chan_1, mid_chan_1, eps=self.eps, dtype=self.dtype
         )
         
         # Decoder Path (Upsampling)
-        self.up_r2 = StyleResampleBlock3D(
-            'UA', self.style_size, mid_chan_1, mid_chan_1, eps=self.eps, dtype=self.dtype
+        self.up_r2 = ResampleBlock3D(
+            'UA', mid_chan_1, mid_chan_1, eps=self.eps, dtype=self.dtype
         )
-        self.conv_r2 = StyleResNetBlock3D(
-            'CACA', self.style_size, mid_chan_2, mid_chan_1, eps=self.eps, dtype=self.dtype
-        )
-        
-        self.up_r1 = StyleResampleBlock3D(
-            'UA', self.style_size, mid_chan_1, mid_chan_1, eps=self.eps, dtype=self.dtype
-        )
-        self.conv_r1 = StyleResNetBlock3D(
-            'CACA', self.style_size, mid_chan_2, mid_chan_1, eps=self.eps, dtype=self.dtype
+        self.conv_r2 = ResNetBlock3D(
+            'CACA', mid_chan_2, mid_chan_1, eps=self.eps, dtype=self.dtype
         )
         
-        self.up_r0 = StyleResampleBlock3D(
-            'UA', self.style_size, mid_chan_1, mid_chan_1, eps=self.eps, dtype=self.dtype
+        self.up_r1 = ResampleBlock3D(
+            'UA', mid_chan_1, mid_chan_1, eps=self.eps, dtype=self.dtype
         )
-        self.conv_r00 = StyleResNetBlock3D(
-            'CACA', self.style_size, mid_chan_2, mid_chan_1, eps=self.eps, dtype=self.dtype
+        self.conv_r1 = ResNetBlock3D(
+            'CACA', mid_chan_2, mid_chan_1, eps=self.eps, dtype=self.dtype
         )
-        self.conv_r01 = StyleResNetBlock3D(
-            'CAC', self.style_size, mid_chan_1, self.out_chan, eps=self.eps, dtype=self.dtype
+        
+        self.up_r0 = ResampleBlock3D(
+            'UA', mid_chan_1, mid_chan_1, eps=self.eps, dtype=self.dtype
+        )
+        self.conv_r00 = ResNetBlock3D(
+            'CACA', mid_chan_2, mid_chan_1, eps=self.eps, dtype=self.dtype
+        )
+        self.conv_r01 = ResNetBlock3D(
+            'CAC', mid_chan_1, self.out_chan, eps=self.eps, dtype=self.dtype
         )
     
-    def __call__(self, x, Om, Dz):
+    def __call__(self, x, Dz):
         """
         Forward pass of the NBodyEmulator.
         
         Args:
             x: Input 3D data tensor of shape (B, C_in, D, H, W)
-            Om: Omega_matter cosmological parameter of shape (B,)
             Dz: Linear growth factors at output redshifts of shape (B,)
             
         Returns:
             displacement:
                 - displacement: Predicted displacement field (B, C_out, D', H', W')
+                - ocity: Predicted ocity field (B, C_out, D', H', W')
         """
-        x = x.astype(self.dtype)
-        Om = Om.astype(self.dtype)
-        Dz = Dz.astype(self.dtype)
-
+        
+        Dz = Dz.astype(self.dtype)[:, None, None, None, None]
+        
         # Apply growth factor scaling to input
         # Factor of 6 is from original model input normalization
-        x = x * (Dz[:, None, None, None, None] / 6.)
-
+        x = x * (Dz / 6.)
+        dx = None  # Will be computed by first layer
+        
         # Store cropped input for final residual connection
         # Assumes input spatial dimensions are large enough (e.g., 256^3)
         x0 = x[:, :, 48:-48, 48:-48, 48:-48]
         
-        # Create style vector from Om and Dz
-        s0 = (Om - 0.3) * 5.
-        s1 = Dz - 1.
-        s = jnp.stack([s0, s1], axis=-1)  # Shape: (B, 2)
-        
         # ===== Encoder Path =====
-        x = self.conv_l00(x, s)
-        y0 = self.conv_l01(x, s)
+        x = self.conv_l00(x)
+        y0 = self.conv_l01(x)
         
-        x = self.down_l0(y0, s)
+        x = self.down_l0(y0)
         # Crop skip connection to match decoder dimensions
         y0 = y0[:, :, 40:-40, 40:-40, 40:-40]
         
-        y1 = self.conv_l1(x, s)
-        x = self.down_l1(y1, s)
+        y1 = self.conv_l1(x)
+        x = self.down_l1(y1)
         # Crop skip connection
         y1 = y1[:, :, 16:-16, 16:-16, 16:-16]
         
-        y2 = self.conv_l2(x, s)
-        x = self.down_l2(y2, s)
+        y2 = self.conv_l2(x)
+        x = self.down_l2(y2)
         # Crop skip connection
         y2 = y2[:, :, 4:-4, 4:-4, 4:-4]
         
         # ===== Bottleneck =====
-        x = self.conv_c(x, s)
+        x = self.conv_c(x)
 
         # ===== Decoder Path =====
-        x = self.up_r2(x, s)
+        x = self.up_r2(x)
         # Concatenate with skip connection
         x = jnp.concatenate([y2, x], axis=1)
-        x = self.conv_r2(x, s)
+        x = self.conv_r2(x)
 
-        x = self.up_r1(x, s)
+        x = self.up_r1(x)
         # Concatenate with skip connection
         x = jnp.concatenate([y1, x], axis=1)
-        x = self.conv_r1(x, s)
+        x = self.conv_r1(x)
 
-        x = self.up_r0(x, s)
+        x = self.up_r0(x)
         # Concatenate with skip connection
         x = jnp.concatenate([y0, x], axis=1)
-        x = self.conv_r00(x, s)
-        x = self.conv_r01(x, s)
-        
+        x = self.conv_r00(x)
+        x = self.conv_r01(x)
+
         # ===== Final Residual Connection =====
         # Displacement field
         displacement = (x + x0) * 6.
         
         return displacement
-    

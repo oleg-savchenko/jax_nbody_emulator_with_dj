@@ -1,7 +1,7 @@
 """
-High-level blocks composed of styled layers for building neural networks.
+High-level blocks composed of layers for building neural networks.
 
-This module contains composite blocks that combine multiple styled layers
+This module contains composite blocks that combine multiple layers
 to create more complex network components like residual blocks and 
 resampling blocks.
 
@@ -19,26 +19,24 @@ import jax
 import jax.numpy as jnp
 import flax.linen as nn
 
-from .layers_vel import LeakyReLUVel
-
-from .style_layers_vel import (
-    StyleConv3DVel,
-    StyleSkip3DVel,
-    StyleUpSample3DVel,
-    StyleDownSample3DVel,
+from .layers_vel import (
+    Conv3DVel,
+    Skip3DVel,
+    UpSample3DVel,
+    DownSample3DVel,
+    LeakyReLUVel
 )
 
-class StyleResampleBlock3DVel(nn.Module):
+class ResampleBlock3DVel(nn.Module):
     """Sequential block for 3D resampling operations."""
     seq: str
-    style_size: int
     in_chan: int
     out_chan: int
     eps: float = 1e-8
     dtype: jnp.dtype = jnp.float32
     
     @nn.compact
-    def __call__(self, x, s, dx=None):
+    def __call__(self, x, dx=None):
         """Forward pass through resample block."""
         mid_chan = max(self.in_chan, self.out_chan)
         conv_idx = 0  # All conv layers (U/D) share same counter
@@ -51,35 +49,33 @@ class StyleResampleBlock3DVel(nn.Module):
                 current_in_chan = self.in_chan if conv_idx == 0 else mid_chan
                 current_out_chan = self.out_chan if conv_idx == num_conv - 1 else mid_chan
                 
-                layer = StyleUpSample3DVel(
+                layer = UpSample3DVel(
                     in_chan=current_in_chan,
                     out_chan=current_out_chan,
-                    style_size=self.style_size,
                     eps=self.eps,
                     name=f'conv_{conv_idx}',
                     dtype=self.dtype
                 )
-                x, dx = layer(x, s, dx)
+                x, dx = layer(x, dx)
                 conv_idx += 1
                 
             elif layer_type == 'D':
                 current_in_chan = self.in_chan if conv_idx == 0 else mid_chan
                 current_out_chan = self.out_chan if conv_idx == num_conv - 1 else mid_chan
                 
-                layer = StyleDownSample3DVel(
+                layer = DownSample3DVel(
                     in_chan=current_in_chan,
                     out_chan=current_out_chan,
-                    style_size=self.style_size,
                     eps=self.eps,
                     name=f'conv_{conv_idx}',
                     dtype=self.dtype
                 )
-                x, dx = layer(x, s, dx)
+                x, dx = layer(x, dx)
                 conv_idx += 1
                 
             elif layer_type == 'A':
                 layer = LeakyReLUVel(name=f'act_{act_idx}', dtype=self.dtype)
-                x, dx = layer(x, s, dx)
+                x, dx = layer(x, dx)
                 act_idx += 1
                 
             else:
@@ -87,17 +83,16 @@ class StyleResampleBlock3DVel(nn.Module):
         
         return x, dx
 
-class StyleResNetBlock3DVel(nn.Module):
+class ResNetBlock3DVel(nn.Module):
     """3D ResNet-style block with style conditioning."""
     seq: str
-    style_size: int
     in_chan: int
     out_chan: int
     eps: float = 1e-8
     dtype: jnp.dtype = jnp.float32
     
     @nn.compact
-    def __call__(self, x, s, dx=None):
+    def __call__(self, x, dx=None):
         """Forward pass through ResNet block."""
         # Check if final activation is needed
         if self.seq[-1] == 'A':
@@ -108,15 +103,14 @@ class StyleResNetBlock3DVel(nn.Module):
             last_act = False
         
         # Skip connection
-        skip = StyleSkip3DVel(
+        skip = Skip3DVel(
             in_chan=self.in_chan,
             out_chan=self.out_chan,
-            style_size=self.style_size,
             eps=self.eps,
             name='skip',
             dtype=self.dtype
         )
-        y, dy = skip(x, s, dx)
+        y, dy = skip(x, dx)
         
         # Count convolutions for cropping
         num_conv = main_seq.count('C')
@@ -138,20 +132,19 @@ class StyleResNetBlock3DVel(nn.Module):
                 current_in_chan = self.in_chan if conv_idx == 0 else mid_chan
                 current_out_chan = self.out_chan if conv_idx == num_conv - 1 else mid_chan
                 
-                layer = StyleConv3DVel(
+                layer = Conv3DVel(
                     in_chan=current_in_chan,
                     out_chan=current_out_chan,
-                    style_size=self.style_size,
                     eps=self.eps,
                     name=f'conv_{conv_idx}',
                     dtype=self.dtype
                 )
-                x, dx = layer(x, s, dx)
+                x, dx = layer(x, dx)
                 conv_idx += 1
                 
             elif layer_type == 'A':
                 layer = LeakyReLUVel(name=f'act_{act_idx}', dtype=self.dtype)
-                x, dx = layer(x, s, dx)
+                x, dx = layer(x, dx)
                 act_idx += 1
                 
             else:
@@ -167,7 +160,6 @@ class StyleResNetBlock3DVel(nn.Module):
         # Optional final activation
         if last_act:
             act = LeakyReLUVel(name='final_act', dtype=self.dtype)
-            x, dx = act(x, s, dx)
+            x, dx = act(x, dx)
         
         return x, dx
-

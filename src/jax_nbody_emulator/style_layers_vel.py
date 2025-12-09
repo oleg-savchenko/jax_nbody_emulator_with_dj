@@ -17,7 +17,7 @@ import flax.linen as nn
 from jax import vmap
 from functools import partial
 
-class StyleBase3DVel(nn.Module):
+class StyleConvBase3DVel(nn.Module):
     """
     Base class for standard 3D style-conditioned convolutions.
     
@@ -275,20 +275,9 @@ class StyleTransposeBase3DVel(nn.Module):
             y, dy = y[0], dy[0]
         
         return y, dy
-    
-class LeakyReLUStyledVel(nn.Module):
-    """Leaky ReLU with tangent computation."""
-    negative_slope: float = 0.01
-    dtype: jnp.dtype = jnp.float32
-    
-    def __call__(self, x, s, dx):
-        slope = jnp.array(self.negative_slope, dtype=self.dtype)
-        y = jax.nn.leaky_relu(x, negative_slope=slope)
-        dy = jnp.where(x > 0, dx, slope * dx)
-        return y, dy
 
 # Specialized layers using partial
-StyleConv3DVel = partial(StyleBase3DVel, kernel_size=3, stride=1)
-StyleSkip3DVel = partial(StyleBase3DVel, kernel_size=1, stride=1)
-StyleDownSample3DVel = partial(StyleBase3DVel, kernel_size=2, stride=2)
+StyleConv3DVel = partial(StyleConvBase3DVel, kernel_size=3, stride=1)
+StyleSkip3DVel = partial(StyleConvBase3DVel, kernel_size=1, stride=1)
+StyleDownSample3DVel = partial(StyleConvBase3DVel, kernel_size=2, stride=2)
 StyleUpSample3DVel = StyleTransposeBase3DVel  # No partial needed, defaults are correct
