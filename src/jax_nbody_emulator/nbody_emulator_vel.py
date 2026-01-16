@@ -19,12 +19,15 @@ import jax
 import jax.numpy as jnp
 import flax.linen as nn
 
+from .cosmology import D
 from .blocks_vel import ResNetBlock3DVel, ResampleBlock3DVel
 
 def _modulate_weights_vel(style_weight, style_bias, weight, s, dx=None, eps = 1.e-8) :
 
         if s.ndim == 1:
             s = s[None]
+
+        s = jnp.array(s, dtype=style_weight.dtype)
         
         s_mod = jnp.dot(s, style_weight.T) + style_bias
         # s_mod: (B, C_in) -> (B, 1, C_in, 1, 1, 1)
@@ -53,43 +56,55 @@ def _modulate_weights_vel(style_weight, style_bias, weight, s, dx=None, eps = 1.
         
         return w_normalized, dw_normalized
     
-def modulate_emulator_parameters_vel(params, z, Om, eps = 1.e-8):
+def modulate_emulator_parameters_vel(params, z, Om, eps = 1.e-8, dtype=jnp.float32):
     """
     Preprocess all network parameters for fixed (z, Om).
     
     Returns new params dict with modulated weights.
     """
     # Compute style vector
+    #s0 = (Om - 0.3) * 5.
+    #s1 = D(jnp.array([z]), jnp.array([Om]))[0] - 1.
+    #s = jnp.array([[s0, s1]])
+
+    Dz = D(z, Om)
+    
+    # Compute style vector
     s0 = (Om - 0.3) * 5.
-    s1 = D(jnp.array([z]), jnp.array([Om]))[0] - 1.
-    s = jnp.array([[s0, s1]])
+    s1 = Dz - 1.
+    s = jnp.stack([s0, s1], axis=-1)
     
     # Process each block
-    dx = None
-    processed_params = {}
-    for block_name, block_params in params.items():
-        processed_params[block_name] = {}
+    processed_params = {'params':{}}
+    # Process each block
+    for block_name, block_params in params['params'].items():
+        processed_params['params'][block_name] = {}
         for layer_name, layer_params in block_params.items():
             if 'style_weight' in layer_params:
+                # Only the first block's conv_0 and skip layers have input that is linear in Dz
+                if block_name == 'conv_l00' and (layer_name == 'conv_0' or layer_name == 'skip') :
+                    dx = None
+                else :
+                    dx = 1
                 # This layer has style modulation - preprocess it
                 w_norm, dw_norm = _modulate_weights_vel(
                     layer_params['style_weight'],
                     layer_params['style_bias'],
                     layer_params['weight'],
                     s,
-                    dx=dx,  # First layer gets None
+                    dx=dx,
                     eps=eps
                 )
-                processed_params[block_name][layer_name] = {
-                    'weight': w_norm[0],  # Remove batch dim
-                    'dweight': dw_norm[0],  # Derivative weight
-                    'bias': layer_params['bias']
+                processed_params['params'][block_name][layer_name] = {
+                    'weight': w_norm[0].astype(dtype),
+                    'dweight': dw_norm[0].astype(dtype),
+                    'bias': layer_params['bias'].astype(dtype)
                 }
-                dx = 1
             else:
                 # Pass through unmodified
-                processed_params[block_name][layer_name] = layer_params
-    
+                print(f'skipping {block_name} {layer_name}')
+                processed_params['params'][block_name][layer_name] = layer_params
+
     return processed_params
 
 class NBodyEmulatorVel(nn.Module):

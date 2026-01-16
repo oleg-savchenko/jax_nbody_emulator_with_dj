@@ -79,7 +79,7 @@ class StyleResampleBlock3DVel(nn.Module):
                 
             elif layer_type == 'A':
                 layer = LeakyReLUVel(name=f'act_{act_idx}', dtype=self.dtype)
-                x, dx = layer(x, s, dx)
+                x, dx = layer(x, dx)
                 act_idx += 1
                 
             else:
@@ -151,7 +151,7 @@ class StyleResNetBlock3DVel(nn.Module):
                 
             elif layer_type == 'A':
                 layer = LeakyReLUVel(name=f'act_{act_idx}', dtype=self.dtype)
-                x, dx = layer(x, s, dx)
+                x, dx = layer(x, dx)
                 act_idx += 1
                 
             else:
@@ -167,7 +167,7 @@ class StyleResNetBlock3DVel(nn.Module):
         # Optional final activation
         if last_act:
             act = LeakyReLUVel(name='final_act', dtype=self.dtype)
-            x, dx = act(x, s, dx)
+            x, dx = act(x, dx)
         
         return x, dx
 

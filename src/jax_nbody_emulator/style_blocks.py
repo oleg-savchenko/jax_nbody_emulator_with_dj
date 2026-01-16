@@ -75,7 +75,7 @@ class StyleResampleBlock3D(nn.Module):
                 
             elif layer_type == 'A':
                 layer = LeakyReLU(name=f'act_{act_idx}', dtype=self.dtype)
-                x = layer(x, s)
+                x = layer(x)
                 act_idx += 1
                 
             else:
@@ -146,7 +146,7 @@ class StyleResNetBlock3D(nn.Module):
                 
             elif layer_type == 'A':
                 layer = LeakyReLU(name=f'act_{act_idx}', dtype=self.dtype)
-                x = layer(x, s)
+                x = layer(x)
                 act_idx += 1
                 
             else:
@@ -161,7 +161,7 @@ class StyleResNetBlock3D(nn.Module):
         # Optional final activation
         if last_act:
             act = LeakyReLU(name='final_act', dtype=self.dtype)
-            x = act(x, s)
+            x = act(x)
         
         return x
 
