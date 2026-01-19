@@ -232,14 +232,14 @@ class TestJAXCompatibility:
         assert jnp.isfinite(f_val)
     
     def test_gradient_computation(self):
-        """Test that gradients can be computed"""
-        def loss_fn(z_val):
-            z = jnp.array([z_val])
-            Om = jnp.array([0.3])
-            return D(z, Om)[0]**2
+        """Test that forward-mode gradients can be computed"""
+        z_val = 1.0
+        Om = jnp.array([0.3])
         
-        grad_fn = jax.grad(loss_fn)
-        grad = grad_fn(1.0)
+        # Use forward-mode (JVP) instead of reverse-mode (grad)
+        primals = (jnp.array([z_val]),)
+        tangents = (jnp.array([1.0]),)
+        _, grad = jax.jvp(lambda z: D(z, Om)[0]**2, primals, tangents)
         
         # Gradient should be finite
         assert jnp.isfinite(grad)

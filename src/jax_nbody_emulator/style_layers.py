@@ -39,7 +39,7 @@ class StyleConvBase3D(nn.Module):
             s: Style (B, style_size) or (style_size,)
             
         Returns:
-            (y, dy): Output and tangent
+            y: Output
         """
 
         # Add batch dim if needed
@@ -132,7 +132,7 @@ class StyleConvTransposeBase3D(nn.Module):
             s: Style (B, style_size) or (style_size,)
             
         Returns:
-            (y, dy): Upsampled output and tangent
+            y: Upsampled output
         """
 
         # Add batch dim if needed

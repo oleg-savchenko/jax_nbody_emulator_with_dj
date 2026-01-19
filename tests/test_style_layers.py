@@ -9,27 +9,22 @@ import pytest
 import jax
 import jax.numpy as jnp
 import jax.random as random
-from flax import linen as nn
 
 from jax_nbody_emulator.style_layers import (
-    StyleBase3D, StyleConv3D, StyleSkip3D, StyleDownSample3D, 
-    StyleUpSample3D, LeakyReLUStyled
-)
-from jax_nbody_emulator.style_layers_vel import (
-    StyleBase3DVel, StyleConv3DVel, StyleSkip3DVel, StyleDownSample3DVel,
-    StyleUpSample3DVel, LeakyReLUStyledVel
+    StyleConvBase3D, StyleConvTransposeBase3D,
+    StyleConv3D, StyleSkip3D, StyleDownSample3D, StyleUpSample3D
 )
 
 
-class TestStyleBase3D:
-    """Test the base StyleBase3D class"""
+class TestStyleConvBase3D:
+    """Test the base StyleConvBase3D class"""
     
     def test_forward_pass_shapes_batched(self):
         """Test that forward pass produces correct output shapes"""
         key = random.PRNGKey(42)
         batch_size = 2
         
-        layer = StyleBase3D(in_chan=32, out_chan=64, kernel_size=3, stride=1)
+        layer = StyleConvBase3D(in_chan=32, out_chan=64, kernel_size=3, stride=1)
         
         # Initialize parameters with batched input
         x = random.normal(key, (batch_size, 32, 8, 16, 16))
@@ -47,7 +42,7 @@ class TestStyleBase3D:
         """Test forward pass with unbatched input"""
         key = random.PRNGKey(42)
         
-        layer = StyleBase3D(in_chan=16, out_chan=32, kernel_size=3, stride=1)
+        layer = StyleConvBase3D(in_chan=16, out_chan=32, kernel_size=3, stride=1)
         
         # Unbatched input
         x = random.normal(key, (16, 8, 8, 8))
@@ -64,7 +59,7 @@ class TestStyleBase3D:
         """Test that different style vectors produce different outputs"""
         key = random.PRNGKey(42)
         
-        layer = StyleBase3D(in_chan=16, out_chan=32, kernel_size=3)
+        layer = StyleConvBase3D(in_chan=16, out_chan=32, kernel_size=3)
         
         x = random.normal(key, (1, 16, 8, 8, 8))
         s1 = jnp.array([[0.3, 1.0]])
@@ -82,8 +77,8 @@ class TestStyleBase3D:
         """Test that dtype parameter works correctly"""
         key = random.PRNGKey(42)
         
-        layer_fp32 = StyleBase3D(in_chan=16, out_chan=32, dtype=jnp.float32)
-        layer_fp16 = StyleBase3D(in_chan=16, out_chan=32, dtype=jnp.float16)
+        layer_fp32 = StyleConvBase3D(in_chan=16, out_chan=32, dtype=jnp.float32)
+        layer_fp16 = StyleConvBase3D(in_chan=16, out_chan=32, dtype=jnp.float16)
         
         x_fp32 = random.normal(key, (1, 16, 8, 8, 8))
         s_fp32 = jnp.array([[0.3, 1.0]])
@@ -94,10 +89,82 @@ class TestStyleBase3D:
         # Check parameter dtypes
         assert params_fp32['params']['weight'].dtype == jnp.float32
         assert params_fp16['params']['weight'].dtype == jnp.float16
+    
+    def test_custom_style_size(self):
+        """Test that custom style_size parameter works"""
+        key = random.PRNGKey(42)
+        
+        style_size = 8
+        layer = StyleConvBase3D(in_chan=16, out_chan=32, style_size=style_size)
+        
+        x = random.normal(key, (1, 16, 8, 8, 8))
+        s = random.normal(key, (1, style_size))
+        
+        params = layer.init(key, x, s)
+        output = layer.apply(params, x, s)
+        
+        # Check style_weight shape
+        assert params['params']['style_weight'].shape == (16, style_size)
+        assert output.shape == (1, 32, 6, 6, 6)
+
+
+class TestStyleConvTransposeBase3D:
+    """Test the StyleConvTransposeBase3D class for upsampling"""
+    
+    def test_forward_pass_shapes_batched(self):
+        """Test that forward pass produces correct upsampled shapes"""
+        key = random.PRNGKey(42)
+        batch_size = 2
+        
+        layer = StyleConvTransposeBase3D(in_chan=32, out_chan=16)
+        
+        x = random.normal(key, (batch_size, 32, 4, 8, 8))
+        s = random.normal(key, (batch_size, 2))
+        params = layer.init(key, x, s)
+        
+        output = layer.apply(params, x, s)
+        
+        # Should double spatial dimensions
+        expected_shape = (batch_size, 16, 8, 16, 16)
+        assert output.shape == expected_shape
+    
+    def test_forward_pass_shapes_unbatched(self):
+        """Test forward pass with unbatched input"""
+        key = random.PRNGKey(42)
+        
+        layer = StyleConvTransposeBase3D(in_chan=32, out_chan=16)
+        
+        x = random.normal(key, (32, 4, 8, 8))
+        s = random.normal(key, (2,))
+        params = layer.init(key, x, s)
+        
+        output = layer.apply(params, x, s)
+        
+        # Output should also be unbatched, with doubled spatial dims
+        expected_shape = (16, 8, 16, 16)
+        assert output.shape == expected_shape
+    
+    def test_style_conditioning_effect(self):
+        """Test that different style vectors produce different outputs"""
+        key = random.PRNGKey(42)
+        
+        layer = StyleConvTransposeBase3D(in_chan=16, out_chan=32)
+        
+        x = random.normal(key, (1, 16, 4, 4, 4))
+        s1 = jnp.array([[0.3, 1.0]])
+        s2 = jnp.array([[0.5, 1.5]])
+        
+        params = layer.init(key, x, s1)
+        
+        output1 = layer.apply(params, x, s1)
+        output2 = layer.apply(params, x, s2)
+        
+        # Outputs should be different when style vectors differ
+        assert not jnp.allclose(output1, output2)
 
 
 class TestStyleConv3D:
-    """Test StyleConv3D layer"""
+    """Test StyleConv3D layer (partial of StyleConvBase3D)"""
     
     def test_default_parameters(self):
         """Test that StyleConv3D has correct default parameters"""
@@ -205,119 +272,6 @@ class TestStyleUpSample3D:
         assert output.shape == expected_shape
 
 
-class TestLeakyReLUStyled:
-    """Test LeakyReLUStyled activation function"""
-    
-    def test_default_negative_slope(self):
-        """Test that default negative slope is 0.01"""
-        layer = LeakyReLUStyled()
-        assert layer.negative_slope == 0.01
-    
-    def test_forward_pass(self):
-        """Test forward pass"""
-        key = random.PRNGKey(42)
-        layer = LeakyReLUStyled()
-        
-        x = jnp.array([[-2.0, -1.0, 0.0, 1.0, 2.0]])
-        s = jnp.array([[0.3, 1.0]])
-        
-        params = layer.init(key, x, s)
-        output = layer.apply(params, x, s)
-        
-        # Test leaky ReLU behavior
-        expected = jnp.array([[-0.02, -0.01, 0.0, 1.0, 2.0]])
-        assert jnp.allclose(output, expected)
-
-
-class TestStyleBase3DVel:
-    """Test the velocity version with tangent computation"""
-    
-    def test_forward_pass_with_tangent(self):
-        """Test forward pass returns both output and tangent"""
-        key = random.PRNGKey(42)
-        
-        layer = StyleBase3DVel(in_chan=16, out_chan=32, kernel_size=3)
-        
-        x = random.normal(key, (1, 16, 8, 8, 8))
-        s = jnp.array([[0.3, 1.0]])
-        dx = random.normal(key, (1, 16, 8, 8, 8))
-        
-        params = layer.init(key, x, s, dx)
-        
-        y, dy = layer.apply(params, x, s, dx)
-        
-        # Check shapes
-        expected_shape = (1, 32, 6, 6, 6)
-        assert y.shape == expected_shape
-        assert dy.shape == expected_shape
-    
-    def test_first_layer_no_tangent(self):
-        """Test first layer behavior (dx=None)"""
-        key = random.PRNGKey(42)
-        
-        layer = StyleBase3DVel(in_chan=16, out_chan=32, kernel_size=3)
-        
-        x = random.normal(key, (1, 16, 8, 8, 8))
-        s = jnp.array([[0.3, 1.0]])
-        
-        params = layer.init(key, x, s, None)
-        
-        y, dy = layer.apply(params, x, s, None)
-        
-        # Both should have valid shapes
-        expected_shape = (1, 32, 6, 6, 6)
-        assert y.shape == expected_shape
-        assert dy.shape == expected_shape
-    
-    def test_tangent_propagation(self):
-        """Test that tangents propagate correctly through layers"""
-        key = random.PRNGKey(42)
-        
-        layer1 = StyleBase3DVel(in_chan=16, out_chan=32, kernel_size=3)
-        layer2 = StyleBase3DVel(in_chan=32, out_chan=64, kernel_size=3)
-        
-        x = random.normal(key, (1, 16, 8, 8, 8))
-        s = jnp.array([[0.3, 1.0]])
-        
-        params1 = layer1.init(key, x, s, None)
-        params2_key = random.fold_in(key, 1)
-        
-        # First layer
-        y1, dy1 = layer1.apply(params1, x, s, None)
-        
-        # Second layer (with tangent from first)
-        params2 = layer2.init(params2_key, y1, s, dy1)
-        y2, dy2 = layer2.apply(params2, y1, s, dy1)
-        
-        # Check shapes are consistent
-        assert y2.shape[1] == 64  # out_chan
-        assert dy2.shape == y2.shape
-
-
-class TestLeakyReLUStyledVel:
-    """Test velocity version of LeakyReLU"""
-    
-    def test_tangent_computation(self):
-        """Test that tangent is computed correctly"""
-        key = random.PRNGKey(42)
-        layer = LeakyReLUStyledVel(negative_slope=0.1)
-        
-        x = jnp.array([[-2.0, -1.0, 0.0, 1.0, 2.0]])
-        s = jnp.array([[0.3, 1.0]])
-        dx = jnp.ones_like(x)
-        
-        params = layer.init(key, x, s, dx)
-        y, dy = layer.apply(params, x, s, dx)
-        
-        # Check output
-        expected_y = jnp.array([[-0.2, -0.1, 0.0, 1.0, 2.0]])
-        assert jnp.allclose(y, expected_y)
-        
-        # Check tangent (slope for negative, 1.0 for positive)
-        expected_dy = jnp.array([[0.1, 0.1, 0.1, 1.0, 1.0]])
-        assert jnp.allclose(dy, expected_dy)
-
-
 class TestParameterInitialization:
     """Test parameter initialization in style layers"""
     
@@ -350,6 +304,22 @@ class TestParameterInitialization:
         
         # Style bias should be initialized to ones
         assert jnp.allclose(style_bias, jnp.ones(16))
+    
+    def test_transpose_weight_initialization_shapes(self):
+        """Test that transpose conv weights are initialized correctly"""
+        key = random.PRNGKey(42)
+        layer = StyleUpSample3D(in_chan=16, out_chan=32)
+        
+        x = random.normal(key, (1, 16, 4, 4, 4))
+        s = jnp.array([[0.3, 1.0]])
+        
+        params = layer.init(key, x, s)
+        
+        # Check parameter shapes (kernel_size=2 by default)
+        assert params['params']['weight'].shape == (32, 16, 2, 2, 2)
+        assert params['params']['bias'].shape == (32,)
+        assert params['params']['style_weight'].shape == (16, 2)
+        assert params['params']['style_bias'].shape == (16,)
 
 
 class TestDownUpSamplingChain:
@@ -377,3 +347,137 @@ class TestDownUpSamplingChain:
         
         # Should return to original spatial dimensions
         assert up_output.shape == (1, 16, *spatial_shape)
+    
+    def test_multiple_down_up_levels(self):
+        """Test multiple levels of downsampling and upsampling"""
+        key = random.PRNGKey(42)
+        
+        # Two levels of downsampling
+        down1 = StyleDownSample3D(in_chan=16, out_chan=32)
+        down2 = StyleDownSample3D(in_chan=32, out_chan=64)
+        up1 = StyleUpSample3D(in_chan=64, out_chan=32)
+        up2 = StyleUpSample3D(in_chan=32, out_chan=16)
+        
+        spatial_shape = (16, 32, 32)
+        x = random.normal(key, (1, 16, *spatial_shape))
+        s = jnp.array([[0.3, 1.0]])
+        
+        # Downsample twice
+        params_d1 = down1.init(key, x, s)
+        x1 = down1.apply(params_d1, x, s)
+        assert x1.shape == (1, 32, 8, 16, 16)
+        
+        params_d2 = down2.init(random.fold_in(key, 1), x1, s)
+        x2 = down2.apply(params_d2, x1, s)
+        assert x2.shape == (1, 64, 4, 8, 8)
+        
+        # Upsample twice
+        params_u1 = up1.init(random.fold_in(key, 2), x2, s)
+        x3 = up1.apply(params_u1, x2, s)
+        assert x3.shape == (1, 32, 8, 16, 16)
+        
+        params_u2 = up2.init(random.fold_in(key, 3), x3, s)
+        x4 = up2.apply(params_u2, x3, s)
+        assert x4.shape == (1, 16, *spatial_shape)
+
+
+class TestJAXCompatibility:
+    """Test JAX-specific functionality"""
+    
+    def test_jit_compilation(self):
+        """Test that layers work with JIT compilation"""
+        key = random.PRNGKey(42)
+        
+        layer = StyleConv3D(in_chan=16, out_chan=32)
+        
+        x = random.normal(key, (1, 16, 8, 8, 8))
+        s = jnp.array([[0.3, 1.0]])
+        
+        params = layer.init(key, x, s)
+        
+        # JIT compile the apply function
+        jit_apply = jax.jit(layer.apply)
+        output = jit_apply(params, x, s)
+        
+        assert output.shape == (1, 32, 6, 6, 6)
+        assert jnp.all(jnp.isfinite(output))
+    
+    def test_vmap_over_batch(self):
+        """Test that layers work correctly with explicit vmap"""
+        key = random.PRNGKey(42)
+        
+        layer = StyleConv3D(in_chan=16, out_chan=32)
+        
+        # Single sample for initialization
+        x_single = random.normal(key, (16, 8, 8, 8))
+        s_single = random.normal(key, (2,))
+        params = layer.init(key, x_single, s_single)
+        
+        # Batch of samples
+        batch_size = 4
+        x_batch = random.normal(key, (batch_size, 16, 8, 8, 8))
+        s_batch = random.normal(key, (batch_size, 2))
+        
+        # Apply to batch
+        output = layer.apply(params, x_batch, s_batch)
+        
+        assert output.shape == (batch_size, 32, 6, 6, 6)
+    
+    def test_gradient_computation(self):
+        """Test that gradients can be computed through the layer"""
+        key = random.PRNGKey(42)
+        
+        layer = StyleConv3D(in_chan=16, out_chan=32)
+        
+        x = random.normal(key, (1, 16, 8, 8, 8))
+        s = jnp.array([[0.3, 1.0]])
+        
+        params = layer.init(key, x, s)
+        
+        def loss_fn(params):
+            output = layer.apply(params, x, s)
+            return jnp.mean(output**2)
+        
+        # Compute gradient
+        grad = jax.grad(loss_fn)(params)
+        
+        # Check gradients exist and are finite
+        assert 'params' in grad
+        assert jnp.all(jnp.isfinite(grad['params']['weight']))
+        assert jnp.all(jnp.isfinite(grad['params']['bias']))
+        assert jnp.all(jnp.isfinite(grad['params']['style_weight']))
+        assert jnp.all(jnp.isfinite(grad['params']['style_bias']))
+
+
+class TestNumericalStability:
+    """Test numerical stability of style layers"""
+    
+    def test_demodulation_with_small_weights(self):
+        """Test that demodulation handles small weights correctly"""
+        key = random.PRNGKey(42)
+        
+        layer = StyleConvBase3D(in_chan=16, out_chan=32, eps=1e-8)
+        
+        x = random.normal(key, (1, 16, 8, 8, 8)) * 1e-6  # Very small input
+        s = jnp.array([[0.3, 1.0]])
+        
+        params = layer.init(key, x, s)
+        output = layer.apply(params, x, s)
+        
+        # Output should be finite
+        assert jnp.all(jnp.isfinite(output))
+    
+    def test_large_style_values(self):
+        """Test behavior with large style values"""
+        key = random.PRNGKey(42)
+        
+        layer = StyleConv3D(in_chan=16, out_chan=32)
+        
+        x = random.normal(key, (1, 16, 8, 8, 8))
+        s = jnp.array([[100.0, 100.0]])  # Large style values
+        
+        params = layer.init(key, x, s)
+        output = layer.apply(params, x, s)
+        
+        # Output should be finite
+        assert jnp.all(jnp.isfinite(output))
