@@ -29,7 +29,6 @@ class ConvBase3DVel(nn.Module):
     kernel_size: int = 3
     stride: int = 1
     eps: float = 1e-8
-    dtype: jnp.dtype = jnp.float32
     
     @nn.compact
     def __call__(self, x, dx=None):
@@ -46,17 +45,18 @@ class ConvBase3DVel(nn.Module):
         kernel_shape = (self.kernel_size,) * 3
         weight = self.param('weight',
                            nn.initializers.lecun_normal(),
-                           (self.out_chan, self.in_chan, *kernel_shape),
-                           self.dtype)
+                           (self.out_chan, self.in_chan, *kernel_shape))
         bias = self.param('bias',
                          nn.initializers.zeros,
-                         (self.out_chan,),
-                         self.dtype)
+                         (self.out_chan,))
         dweight = self.param('dweight',
                            nn.initializers.lecun_normal(),
-                           (self.out_chan, self.in_chan, *kernel_shape),
-                           self.dtype)
-                
+                           (self.out_chan, self.in_chan, *kernel_shape))
+    
+        weight = weight.astype(x.dtype)
+        dweight = dweight.astype(x.dtype)
+        bias = bias.astype(x.dtype)
+            
         # Convolution using vmap
         def single_conv(x_i, w_i):
             out = jax.lax.conv_general_dilated(
@@ -108,7 +108,6 @@ class ConvTransposeBase3DVel(nn.Module):
     kernel_size: int = 2
     stride: int = 1
     eps: float = 1e-8
-    dtype: jnp.dtype = jnp.float32
     
     @nn.compact
     def __call__(self, x, dx=None):
@@ -125,17 +124,18 @@ class ConvTransposeBase3DVel(nn.Module):
         kernel_shape = (self.kernel_size,) * 3
         weight = self.param('weight',
                            nn.initializers.lecun_normal(),
-                           (self.out_chan, self.in_chan, *kernel_shape),
-                           self.dtype)
+                           (self.out_chan, self.in_chan, *kernel_shape))
         bias = self.param('bias',
                          nn.initializers.zeros,
-                         (self.out_chan,),
-                         self.dtype)
+                         (self.out_chan,))
         dweight = self.param('dweight',
                            nn.initializers.lecun_normal(),
-                           (self.out_chan, self.in_chan, *kernel_shape),
-                           self.dtype)
+                           (self.out_chan, self.in_chan, *kernel_shape))
         
+        weight = weight.astype(x.dtype)
+        dweight = dweight.astype(x.dtype)
+        bias = bias.astype(x.dtype)
+
         # Upsampling convolution (using lhs_dilation)
         def single_upsample_conv(x_i, w_i):
             out = jax.lax.conv_general_dilated(
@@ -178,10 +178,9 @@ class ConvTransposeBase3DVel(nn.Module):
 class LeakyReLUVel(nn.Module):
     """Leaky ReLU with tangent computation."""
     negative_slope: float = 0.01
-    dtype: jnp.dtype = jnp.float32
     
     def __call__(self, x, dx):
-        slope = jnp.array(self.negative_slope, dtype=self.dtype)
+        slope = jnp.array(self.negative_slope, x.dtype)
         y = jax.nn.leaky_relu(x, negative_slope=slope)
         dy = jnp.where(x > 0, dx, slope * dx)
         return y, dy
@@ -190,4 +189,4 @@ class LeakyReLUVel(nn.Module):
 Conv3DVel = partial(ConvBase3DVel, kernel_size=3, stride=1)
 Skip3DVel = partial(ConvBase3DVel, kernel_size=1, stride=1)
 DownSample3DVel = partial(ConvBase3DVel, kernel_size=2, stride=2)
-UpSample3DVel = ConvTransposeBase3DVel  # No partial needed, defaults are correct
+UpSample3DVel = ConvTransposeBase3DVel

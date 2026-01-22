@@ -1,7 +1,7 @@
 """
 Main N-body emulator model implementation.
 
-This module contains the primary NBodyEmulator class that implements
+This module contains the primary StyleNBodyEmulatorVelCor class that implements
 a 3D U-Net-like architecture with style conditioning for cosmological
 N-body simulations.
 
@@ -21,7 +21,7 @@ import flax.linen as nn
 
 from .style_blocks_vel import StyleResNetBlock3DVel, StyleResampleBlock3DVel
 
-class StyleNBodyEmulatorVel(nn.Module):
+class StyleNBodyEmulatorVelCore(nn.Module):
     """
     3D U-Net-like neural network with style conditioning for N-body simulations.
     
@@ -41,7 +41,6 @@ class StyleNBodyEmulatorVel(nn.Module):
     out_chan: int = 3
     mid_chan: int = 64
     eps: float = 1e-8
-    dtype: jnp.dtype = jnp.float32
     
     def setup(self):
         """Initialize all network layers."""
@@ -50,62 +49,62 @@ class StyleNBodyEmulatorVel(nn.Module):
         
         # Encoder Path (Downsampling)
         self.conv_l00 = StyleResNetBlock3DVel(
-            'CACA', self.style_size, self.in_chan, mid_chan_1, eps=self.eps, dtype=self.dtype
+            'CACA', self.style_size, self.in_chan, mid_chan_1, eps=self.eps
         )
         self.conv_l01 = StyleResNetBlock3DVel(
-            'CACA', self.style_size, mid_chan_1, mid_chan_1, eps=self.eps, dtype=self.dtype
+            'CACA', self.style_size, mid_chan_1, mid_chan_1, eps=self.eps
         )
         self.down_l0 = StyleResampleBlock3DVel(
-            'DA', self.style_size, mid_chan_1, mid_chan_1, eps=self.eps, dtype=self.dtype
+            'DA', self.style_size, mid_chan_1, mid_chan_1, eps=self.eps
         )
         
         self.conv_l1 = StyleResNetBlock3DVel(
-            'CACA', self.style_size, mid_chan_1, mid_chan_1, eps=self.eps, dtype=self.dtype
+            'CACA', self.style_size, mid_chan_1, mid_chan_1, eps=self.eps
         )
         self.down_l1 = StyleResampleBlock3DVel(
-            'DA', self.style_size, mid_chan_1, mid_chan_1, eps=self.eps, dtype=self.dtype
+            'DA', self.style_size, mid_chan_1, mid_chan_1, eps=self.eps
         )
         
         self.conv_l2 = StyleResNetBlock3DVel(
-            'CACA', self.style_size, mid_chan_1, mid_chan_1, eps=self.eps, dtype=self.dtype
+            'CACA', self.style_size, mid_chan_1, mid_chan_1, eps=self.eps
         )
         self.down_l2 = StyleResampleBlock3DVel(
-            'DA', self.style_size, mid_chan_1, mid_chan_1, eps=self.eps, dtype=self.dtype
+            'DA', self.style_size, mid_chan_1, mid_chan_1, eps=self.eps
         )
         
         # Bottleneck
         self.conv_c = StyleResNetBlock3DVel(
-            'CACA', self.style_size, mid_chan_1, mid_chan_1, eps=self.eps, dtype=self.dtype
+            'CACA', self.style_size, mid_chan_1, mid_chan_1, eps=self.eps
         )
         
         # Decoder Path (Upsampling)
         self.up_r2 = StyleResampleBlock3DVel(
-            'UA', self.style_size, mid_chan_1, mid_chan_1, eps=self.eps, dtype=self.dtype
+            'UA', self.style_size, mid_chan_1, mid_chan_1, eps=self.eps
         )
         self.conv_r2 = StyleResNetBlock3DVel(
-            'CACA', self.style_size, mid_chan_2, mid_chan_1, eps=self.eps, dtype=self.dtype
+            'CACA', self.style_size, mid_chan_2, mid_chan_1, eps=self.eps
         )
         
         self.up_r1 = StyleResampleBlock3DVel(
-            'UA', self.style_size, mid_chan_1, mid_chan_1, eps=self.eps, dtype=self.dtype
+            'UA', self.style_size, mid_chan_1, mid_chan_1, eps=self.eps
         )
         self.conv_r1 = StyleResNetBlock3DVel(
-            'CACA', self.style_size, mid_chan_2, mid_chan_1, eps=self.eps, dtype=self.dtype
+            'CACA', self.style_size, mid_chan_2, mid_chan_1, eps=self.eps
         )
         
         self.up_r0 = StyleResampleBlock3DVel(
-            'UA', self.style_size, mid_chan_1, mid_chan_1, eps=self.eps, dtype=self.dtype
+            'UA', self.style_size, mid_chan_1, mid_chan_1, eps=self.eps
         )
         self.conv_r00 = StyleResNetBlock3DVel(
-            'CACA', self.style_size, mid_chan_2, mid_chan_1, eps=self.eps, dtype=self.dtype
+            'CACA', self.style_size, mid_chan_2, mid_chan_1, eps=self.eps
         )
         self.conv_r01 = StyleResNetBlock3DVel(
-            'CAC', self.style_size, mid_chan_1, self.out_chan, eps=self.eps, dtype=self.dtype
+            'CAC', self.style_size, mid_chan_1, self.out_chan, eps=self.eps
         )
-    
+
     def __call__(self, x, Om, Dz, vel_fac):
         """
-        Forward pass of the NBodyEmulator.
+        Forward pass of the StyleNBodyEmulatorVelCor.
         
         Args:
             x: Input 3D data tensor of shape (B, C_in, D, H, W)
@@ -119,20 +118,21 @@ class StyleNBodyEmulatorVel(nn.Module):
                 - velocity: Predicted velocity field (B, C_out, D', H', W')
         """
         
-        x = x.astype(self.dtype)
-        Om = Om.astype(self.dtype)
-        Dz = Dz.astype(self.dtype)
-        vel_fac = vel_fac.astype(self.dtype)
-        
-        # Apply growth factor scaling to input
-        # Factor of 6 is from original model input normalization
-        x = x * (Dz[:, None, None, None, None] / 6.)
-        dx = None  # Will be computed by first layer
+
+        Om = jnp.atleast_1d(Om)
+        Dz = jnp.atleast_1d(Dz)
         
         # Create style vector from Om and Dz
         s0 = (Om - 0.3) * 5.
         s1 = Dz - 1.
-        s = jnp.stack([s0, s1], axis=-1)  # Shape: (B, 2)
+        s = jnp.stack([s0, s1], axis=-1).astype(jnp.float32)  # Shape: (B, 2)
+
+        # Apply growth factor scaling to input
+        # Factor of 6 is from original model input normalization
+        Dz = Dz[:, None, None, None, None]
+        in_norm = (Dz / 6.).astype(x.dtype)
+        x = x * in_norm
+        dx = None  # Will be computed by first layer
         
         # Store cropped input for final residual connection
         # Assumes input spatial dimensions are large enough (e.g., 256^3)
@@ -187,7 +187,9 @@ class StyleNBodyEmulatorVel(nn.Module):
         displacement = (x + x0) * 6.
         
         # Velocity field (includes derivative w.r.t. Dz)
-        velocity = (dx + x0 / Dz[:, None, None, None, None]) * vel_fac[:, None, None, None, None] * 6.
+        vel_fac = jnp.atleast_1d(vel_fac)[:, None, None, None, None]
+        dx_norm = (vel_fac * 6.).astype(x.dtype)
+        x0_norm = (vel_fac * 6. / Dz).astype(x.dtype)
+        velocity = dx * dx_norm  + x0 * x0_norm
         
         return displacement, velocity
-

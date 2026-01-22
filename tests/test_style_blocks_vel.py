@@ -224,26 +224,6 @@ class TestStyleResampleBlock3DVel:
         assert not jnp.allclose(y1, y2)
         assert not jnp.allclose(dy1, dy2)
     
-    def test_dtype_parameter(self):
-        """Test that dtype parameter is respected"""
-        key = random.PRNGKey(42)
-        
-        block_fp16 = StyleResampleBlock3DVel(
-            seq='UA',
-            style_size=2,
-            in_chan=16,
-            out_chan=32,
-            dtype=jnp.float16
-        )
-        
-        x = random.normal(key, (1, 16, 4, 8, 8)).astype(jnp.float16)
-        s = jnp.array([[0.3, 1.0]], dtype=jnp.float16)
-        
-        params = block_fp16.init(key, x, s)
-        
-        first_param = jax.tree_util.tree_leaves(params)[0]
-        assert first_param.dtype == jnp.float16
-    
     def test_batched_input(self):
         """Test block with batched input"""
         key = random.PRNGKey(42)

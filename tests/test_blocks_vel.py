@@ -185,24 +185,6 @@ class TestResampleBlock3DVel:
         with pytest.raises(ValueError, match='Layer type "X" not supported'):
             params = block.init(key, x)
     
-    def test_dtype_parameter(self):
-        """Test that dtype parameter is respected"""
-        key = random.PRNGKey(42)
-        
-        block_fp16 = ResampleBlock3DVel(
-            seq='UA',
-            in_chan=16,
-            out_chan=32,
-            dtype=jnp.float16
-        )
-        
-        x = random.normal(key, (1, 16, 4, 8, 8)).astype(jnp.float16)
-        
-        params = block_fp16.init(key, x)
-        
-        first_param = jax.tree_util.tree_leaves(params)[0]
-        assert first_param.dtype == jnp.float16
-    
     def test_batched_input(self):
         """Test block with batched input"""
         key = random.PRNGKey(42)

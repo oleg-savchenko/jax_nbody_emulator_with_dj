@@ -35,7 +35,6 @@ class StyleResampleBlock3DVel(nn.Module):
     in_chan: int
     out_chan: int
     eps: float = 1e-8
-    dtype: jnp.dtype = jnp.float32
     
     @nn.compact
     def __call__(self, x, s, dx=None):
@@ -56,8 +55,7 @@ class StyleResampleBlock3DVel(nn.Module):
                     out_chan=current_out_chan,
                     style_size=self.style_size,
                     eps=self.eps,
-                    name=f'conv_{conv_idx}',
-                    dtype=self.dtype
+                    name=f'conv_{conv_idx}'
                 )
                 x, dx = layer(x, s, dx)
                 conv_idx += 1
@@ -71,14 +69,13 @@ class StyleResampleBlock3DVel(nn.Module):
                     out_chan=current_out_chan,
                     style_size=self.style_size,
                     eps=self.eps,
-                    name=f'conv_{conv_idx}',
-                    dtype=self.dtype
+                    name=f'conv_{conv_idx}'
                 )
                 x, dx = layer(x, s, dx)
                 conv_idx += 1
                 
             elif layer_type == 'A':
-                layer = LeakyReLUVel(name=f'act_{act_idx}', dtype=self.dtype)
+                layer = LeakyReLUVel(name=f'act_{act_idx}')
                 x, dx = layer(x, dx)
                 act_idx += 1
                 
@@ -94,7 +91,6 @@ class StyleResNetBlock3DVel(nn.Module):
     in_chan: int
     out_chan: int
     eps: float = 1e-8
-    dtype: jnp.dtype = jnp.float32
     
     @nn.compact
     def __call__(self, x, s, dx=None):
@@ -113,8 +109,7 @@ class StyleResNetBlock3DVel(nn.Module):
             out_chan=self.out_chan,
             style_size=self.style_size,
             eps=self.eps,
-            name='skip',
-            dtype=self.dtype
+            name='skip'
         )
         y, dy = skip(x, s, dx)
         
@@ -143,14 +138,13 @@ class StyleResNetBlock3DVel(nn.Module):
                     out_chan=current_out_chan,
                     style_size=self.style_size,
                     eps=self.eps,
-                    name=f'conv_{conv_idx}',
-                    dtype=self.dtype
+                    name=f'conv_{conv_idx}'
                 )
                 x, dx = layer(x, s, dx)
                 conv_idx += 1
                 
             elif layer_type == 'A':
-                layer = LeakyReLUVel(name=f'act_{act_idx}', dtype=self.dtype)
+                layer = LeakyReLUVel(name=f'act_{act_idx}')
                 x, dx = layer(x, dx)
                 act_idx += 1
                 
@@ -166,8 +160,7 @@ class StyleResNetBlock3DVel(nn.Module):
         
         # Optional final activation
         if last_act:
-            act = LeakyReLUVel(name='final_act', dtype=self.dtype)
+            act = LeakyReLUVel(name='final_act')
             x, dx = act(x, dx)
         
         return x, dx
-

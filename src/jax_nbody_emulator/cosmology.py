@@ -56,23 +56,46 @@ def _log_H(z, Om):
     return jnp.log(H(z, Om))
 
 # Use forward-mode differentiation (JVP) instead of reverse-mode (grad)
-def _dlogD_dz_scalar(z_scalar, Om_scalar):
+def _dlogD_dz(z_scalar, Om_scalar):
     """Scalar derivative of log D with respect to z using forward-mode AD."""
+    z_scalar = jnp.asarray(z_scalar)
+    Om_scalar = jnp.asarray(Om_scalar)
     primals = (z_scalar,)
     tangents = (jnp.ones_like(z_scalar),)
     _, deriv = jax.jvp(lambda z: _log_D(z, Om_scalar), primals, tangents)
     return deriv
 
-def _dlogH_dz_scalar(z_scalar, Om_scalar):
+def _dlogH_dz(z_scalar, Om_scalar):
     """Scalar derivative of log H with respect to z using forward-mode AD."""
+    z_scalar = jnp.asarray(z_scalar)
+    Om_scalar = jnp.asarray(Om_scalar)
     primals = (z_scalar,)
     tangents = (jnp.ones_like(z_scalar),)
     _, deriv = jax.jvp(lambda z: _log_H(z, Om_scalar), primals, tangents)
     return deriv
 
 # Vectorized derivatives
-_dlogD_dz = jax.jit(jax.vmap(_dlogD_dz_scalar, in_axes=(0, 0)))
-_dlogH_dz = jax.jit(jax.vmap(_dlogH_dz_scalar, in_axes=(0, 0)))
+@jax.jit  
+def dlogD_dz(z, Om):
+    """Derivative of log D with respect to z. Preserves input shape."""
+    z = jnp.asarray(z)
+    Om = jnp.asarray(Om)
+    in_shape = z.shape
+    z_arr = jnp.atleast_1d(z)
+    Om_arr = jnp.atleast_1d(Om)
+    result = jax.vmap(_dlogD_dz)(z_arr, Om_arr)
+    return result.reshape(in_shape)
+
+@jax.jit
+def dlogH_dz(z, Om):
+    """Derivative of log H with respect to z. Preserves input shape."""
+    z = jnp.asarray(z)
+    Om = jnp.asarray(Om)
+    in_shape = z.shape
+    z_arr = jnp.atleast_1d(z)
+    Om_arr = jnp.atleast_1d(Om)
+    result = jax.vmap(_dlogH_dz)(z_arr, Om_arr)
+    return result.reshape(in_shape)
 
 @jax.jit
 def f(z, Om):
@@ -87,8 +110,7 @@ def f(z, Om):
     Returns:
         Growth rate(s) of shape (B,)
     """
-    dlogD_dz_val = _dlogD_dz(z, Om)
-    return -dlogD_dz_val * (1 + z)
+    return -dlogD_dz(z, Om) * (1 + z)
 
 @jax.jit
 def dlogH_dloga(z, Om):
@@ -102,8 +124,7 @@ def dlogH_dloga(z, Om):
     Returns:
         Derivative(s) of shape (B,)
     """
-    dlogH_dz_val = _dlogH_dz(z, Om)
-    return -dlogH_dz_val * (1 + z)
+    return -dlogH_dz(z, Om) * (1 + z)
 
 @jax.jit
 def vel_norm(z, Om):

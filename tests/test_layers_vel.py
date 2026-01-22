@@ -156,23 +156,7 @@ class TestConvBase3DVel:
         expected_shape = (1, 32, 4, 8, 8)
         assert y.shape == expected_shape
         assert dy.shape == expected_shape
-    
-    def test_dtype_parameter(self):
-        """Test that dtype parameter works correctly"""
-        key = random.PRNGKey(42)
-        
-        layer_fp32 = ConvBase3DVel(in_chan=16, out_chan=32, dtype=jnp.float32)
-        layer_fp16 = ConvBase3DVel(in_chan=16, out_chan=32, dtype=jnp.float16)
-        
-        x_fp32 = random.normal(key, (1, 16, 8, 8, 8))
-        
-        params_fp32 = layer_fp32.init(key, x_fp32)
-        params_fp16 = layer_fp16.init(key, x_fp32.astype(jnp.float16))
-        
-        # Check parameter dtypes
-        assert params_fp32['params']['weight'].dtype == jnp.float32
-        assert params_fp16['params']['weight'].dtype == jnp.float16
-
+   
 
 class TestConvTransposeBase3DVel:
     """Test the ConvTransposeBase3DVel class for upsampling"""
@@ -349,28 +333,6 @@ class TestLeakyReLUVel:
         assert jnp.allclose(y, expected_y)
         assert jnp.allclose(dy, expected_dy)
     
-    def test_dtype_parameter(self):
-        """Test that dtype parameter works correctly"""
-        key = random.PRNGKey(42)
-        
-        layer_fp32 = LeakyReLUVel(dtype=jnp.float32)
-        layer_fp16 = LeakyReLUVel(dtype=jnp.float16)
-        
-        x_fp32 = jnp.array([[-1.0, 0.0, 1.0]])
-        dx_fp32 = jnp.ones_like(x_fp32)
-        
-        x_fp16 = x_fp32.astype(jnp.float16)
-        dx_fp16 = dx_fp32.astype(jnp.float16)
-        
-        params_fp32 = layer_fp32.init(key, x_fp32, dx_fp32)
-        params_fp16 = layer_fp16.init(key, x_fp16, dx_fp16)
-        
-        y_fp32, dy_fp32 = layer_fp32.apply(params_fp32, x_fp32, dx_fp32)
-        y_fp16, dy_fp16 = layer_fp16.apply(params_fp16, x_fp16, dx_fp16)
-        
-        assert y_fp32.dtype == jnp.float32
-        assert y_fp16.dtype == jnp.float16
-
 
 class TestConv3DVel:
     """Test Conv3DVel layer (partial of ConvBase3DVel)"""

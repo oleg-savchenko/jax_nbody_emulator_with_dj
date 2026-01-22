@@ -73,23 +73,6 @@ class TestStyleConvBase3D:
         # Outputs should be different when style vectors differ
         assert not jnp.allclose(output1, output2)
     
-    def test_dtype_parameter(self):
-        """Test that dtype parameter works correctly"""
-        key = random.PRNGKey(42)
-        
-        layer_fp32 = StyleConvBase3D(in_chan=16, out_chan=32, dtype=jnp.float32)
-        layer_fp16 = StyleConvBase3D(in_chan=16, out_chan=32, dtype=jnp.float16)
-        
-        x_fp32 = random.normal(key, (1, 16, 8, 8, 8))
-        s_fp32 = jnp.array([[0.3, 1.0]])
-        
-        params_fp32 = layer_fp32.init(key, x_fp32, s_fp32)
-        params_fp16 = layer_fp16.init(key, x_fp32.astype(jnp.float16), s_fp32.astype(jnp.float16))
-        
-        # Check parameter dtypes
-        assert params_fp32['params']['weight'].dtype == jnp.float32
-        assert params_fp16['params']['weight'].dtype == jnp.float16
-    
     def test_custom_style_size(self):
         """Test that custom style_size parameter works"""
         key = random.PRNGKey(42)

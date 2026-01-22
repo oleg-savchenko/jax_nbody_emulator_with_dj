@@ -25,7 +25,6 @@ class ConvBase3D(nn.Module):
     kernel_size: int = 3
     stride: int = 1
     eps: float = 1e-8
-    dtype: jnp.dtype = jnp.float32
     
     @nn.compact
     def __call__(self, x):
@@ -41,13 +40,14 @@ class ConvBase3D(nn.Module):
         kernel_shape = (self.kernel_size,) * 3
         weight = self.param('weight',
                            nn.initializers.lecun_normal(),
-                           (self.out_chan, self.in_chan, *kernel_shape),
-                           self.dtype)
+                           (self.out_chan, self.in_chan, *kernel_shape))
         bias = self.param('bias',
                          nn.initializers.zeros,
-                         (self.out_chan,),
-                         self.dtype)
-                
+                         (self.out_chan,))
+    
+        weight = weight.astype(x.dtype)
+        bias = bias.astype(x.dtype)
+            
         # Convolution using vmap        
         def single_conv_b(x_i, w_i, b_i):
             out = jax.lax.conv_general_dilated(
@@ -81,7 +81,6 @@ class ConvTransposeBase3D(nn.Module):
     kernel_size: int = 2
     stride: int = 1
     eps: float = 1e-8
-    dtype: jnp.dtype = jnp.float32
     
     @nn.compact
     def __call__(self, x):
@@ -97,12 +96,13 @@ class ConvTransposeBase3D(nn.Module):
         kernel_shape = (self.kernel_size,) * 3
         weight = self.param('weight',
                            nn.initializers.lecun_normal(),
-                           (self.out_chan, self.in_chan, *kernel_shape),
-                           self.dtype)
+                           (self.out_chan, self.in_chan, *kernel_shape))
         bias = self.param('bias',
                          nn.initializers.zeros,
-                         (self.out_chan,),
-                         self.dtype)
+                         (self.out_chan,))
+
+        weight = weight.astype(x.dtype)
+        bias = bias.astype(x.dtype)
         
         # Upsampling convolution (using lhs_dilation)        
         def single_upsample_conv_b(x_i, w_i, b_i):
@@ -127,14 +127,13 @@ class ConvTransposeBase3D(nn.Module):
 class LeakyReLU(nn.Module):
     """Leaky ReLU."""
     negative_slope: float = 0.01
-    dtype: jnp.dtype = jnp.float32
     
     def __call__(self, x):
-        slope = jnp.array(self.negative_slope, dtype=self.dtype)
+        slope = jnp.array(self.negative_slope, dtype=x.dtype)
         return jax.nn.leaky_relu(x, negative_slope=slope)
 
 # Specialized layers using partial
 Conv3D = partial(ConvBase3D, kernel_size=3, stride=1)
 Skip3D = partial(ConvBase3D, kernel_size=1, stride=1)
 DownSample3D = partial(ConvBase3D, kernel_size=2, stride=2)
-UpSample3D = ConvTransposeBase3D  # No partial needed, defaults are correct
+UpSample3D = ConvTransposeBase3D

@@ -1,9 +1,8 @@
 """
-Main N-body emulator model implementation.
+Factory functions for creating N-body emulator models and processors.
 
-This module contains the primary NBodyEmulator class that implements
-a 3D U-Net-like architecture for cosmological
-N-body simulations.
+Provides a unified interface for constructing emulator bundles with
+the appropriate model variant, parameters, and subbox processor.
 
 Copyright (C) 2025 Drew Jamieson
 Licensed under GNU GPL v3.0 - see LICENSE file for details.
@@ -11,20 +10,129 @@ Licensed under GNU GPL v3.0 - see LICENSE file for details.
 Author: Drew Jamieson <drew.s.jamieson@gmail.com>
 """
 
-import jax
+from dataclasses import dataclass
+from pathlib import Path
+
 import jax.numpy as jnp
 import flax.linen as nn
 
 from .cosmology import D
-from .blocks import ResNetBlock3D, ResampleBlock3D
+from .subbox import SubboxConfig, SubboxProcessor
+
+
+@dataclass
+class NBodyEmulator:
+    """
+    Container for emulator components with convenient access methods.
+    
+    Attributes:
+        model: The underlying Flax model
+        params: Model parameters (None if not loaded)
+        processor: SubboxProcessor for large volumes (None if not created)
+        premodulate: Whether params were premodulated (True=fixed cosmology, False=runtime cosmology), defaut = False
+        compute_vel: Whether model returns velocity field, default=True
+    """
+    model: nn.Module
+    params: dict | None
+    processor: SubboxProcessor | None
+    premodulate: bool = False
+    compute_vel: bool = True
+    dtype: jnp.dtype = jnp.float32
+    
+    def apply(self, x, z, Om):
+        """
+        Apply model directly to input tensor.
+        
+        Args:
+            x: Input tensor (B, C, D, H, W)
+            z: Redshift (scalar or array)
+            Om: Omega_matter (scalar or array)
+            
+        Returns:
+            If compute_vel=False: displacement (B, C, D', H', W')
+            If compute_vel=True: (displacement, velocity) tuple
+        """
+        if self.params is None:
+            raise ValueError("No parameters loaded. Use load_params=True in create_emulator.")
+        
+        from .cosmology import D, vel_norm
+
+        z = jnp.atleast_1d(z)
+        Om = jnp.atleast_1d(Om)
+        Dz = D(z, Om)
+        if self.compute_vel:
+            vel_fac = vel_norm(z, Om)
+
+        x = x.astype(self.dtype)
+        
+        if self.premodulate:
+            # Premodulated params - non-style models (Om baked in)
+            if self.compute_vel:
+                return self.model.apply(self.params, x, Dz, vel_fac)
+            else:
+                return self.model.apply(self.params, x, Dz)
+        else:
+            # Style models - Om passed at runtime
+            if self.compute_vel:
+                return self.model.apply(self.params, x, Om, Dz, vel_fac)
+            else:
+                return self.model.apply(self.params, x, Om, Dz)
+    
+    def process_box(
+        self,
+        input_box,
+        z: float,
+        Om: float,
+        desc: str = "Processing subboxes",
+        show_progress: bool = True
+    ):
+        """
+        Process large volume through subbox decomposition.
+        
+        Args:
+            input_box: Input displacement field on CPU (C, D, H, W)
+            z: Redshift
+            Om: Omega_matter
+            desc: Progress bar description
+            show_progress: Whether to show progress bar
+            
+        Returns:
+            If compute_vel=False: displacement (C, D, H, W) on CPU as float32
+            If compute_vel=True: (displacement, velocity) tuple
+        """
+        if self.processor is None:
+            raise ValueError("No processor created. Use create_processor=True in create_emulator.")
+        
+        return self.processor.process_box(
+            input_box, z, Om, desc=desc, show_progress=show_progress
+        )
+    
+    def __call__(self, x, z, Om):
+        """Alias for apply()."""
+        return self.apply(x, z, Om)
+
+
+def load_default_parameters() -> dict:
+    """
+    Load default pretrained model parameters.
+    
+    Returns:
+        Parameter dictionary
+    """
+    import numpy as np
+    
+    params_path = Path(__file__).parent / "model_parameters" / "nbody_emulator_params.npz"
+    
+    with np.load(params_path, allow_pickle=True) as f:
+        params = f['params'].item()
+    
+    return {'params': params}
 
 def _modulate_weights(style_weight, style_bias, weight, s, eps = 1.e-8) :
 
         if s.ndim == 1:
             s = s[None]
 
-        s = jnp.array(s, dtype=style_weight.dtype)
-        
         s_mod = jnp.dot(s, style_weight.T) + style_bias
         # s_mod: (B, C_in) -> (B, 1, C_in, 1, 1, 1)
         s_mod = s_mod[:, None, :, None, None, None]
@@ -33,13 +141,13 @@ def _modulate_weights(style_weight, style_bias, weight, s, eps = 1.e-8) :
         w = weight[None] * s_mod
         
         # Demodulation (normalize over spatial + input channels)
-        norm = jnp.sqrt(jnp.sum(w**2, axis=(2,3,4,5), keepdims=True) + jnp.array(eps, dtype=w.dtype))
+        norm = jnp.sqrt(jnp.sum(w**2, axis=(2,3,4,5), keepdims=True) + jnp.array(eps))
         
         w_normalized = w / norm
         
         return w_normalized
 
-def modulate_emulator_parameters(params, z, Om, eps = 1.e-8, dtype = jnp.float32):
+def modulate_emulator_parameters(params, z, Om, eps = 1.e-8):
     """
     Preprocess all network parameters for fixed (z, Om).
     
@@ -68,164 +176,211 @@ def modulate_emulator_parameters(params, z, Om, eps = 1.e-8, dtype = jnp.float32
                     eps=eps
                 )
                 processed_params['params'][block_name][layer_name] = {
-                    'weight': w_norm[0].astype(dtype),
-                    'bias': layer_params['bias'].astype(dtype)
+                    'weight': w_norm[0],
+                    'bias': layer_params['bias']
                 }
             else:
                 # Pass through unmodified
                 print(f'skipping {block_name} {layer_name}')
                 processed_params['params'][block_name][layer_name] = layer_params
     
-    return processed_params   
+    return processed_params
 
-class NBodyEmulator(nn.Module):
+def _modulate_weights_vel(style_weight, style_bias, weight, s, dx=None, eps = 1.e-8) :
+
+        if s.ndim == 1:
+            s = s[None]
+
+        s_mod = jnp.dot(s, style_weight.T) + style_bias
+        # s_mod: (B, C_in) -> (B, 1, C_in, 1, 1, 1)
+        s_mod = s_mod[:, None, :, None, None, None]
+        ds = jnp.zeros_like(s).at[:, 1].set(1.0)
+        ds_mod = jnp.dot(ds, style_weight.T)
+        ds_mod = ds_mod[:, None, :, None, None, None]
+        
+        # w: (C_out, C_in, K, K, K) -> (B, C_out, C_in, K, K, K)
+        w = weight[None] * s_mod
+        dw_style = weight[None] * ds_mod
+        
+        # Demodulation (normalize over spatial + input channels)
+        norm = jnp.sqrt(jnp.sum(w**2, axis=(2,3,4,5), keepdims=True) + eps)
+        dnorm = -jnp.sum(w * dw_style, axis=(2,3,4,5), keepdims=True) / (norm**3)
+        
+        w_normalized = w / norm
+        dw_normalized = (dw_style / norm) + (w * dnorm)
+
+        if dx is None:
+            # First layer handling
+            Dz = (s[:, 1] + 1.0)[:, None, None, None, None, None]
+            dw_normalized = dw_normalized + w_normalized / Dz
+        else:
+            dw_normalized = dw_normalized
+        
+        return w_normalized, dw_normalized
+    
+def modulate_emulator_parameters_vel(params, z, Om, eps = 1.e-8):
     """
-    3D U-Net-like neural network for N-body simulations.
+    Preprocess all network parameters for fixed (z, Om).
     
-    Processes 3D volumetric data through encoder-bottleneck-decoder architecture
-    with skip connections.
-    
-    Attributes:
-        in_chan: Number of input channels
-        out_chan: Number of output channels
-        mid_chan: Number of channels in intermediate layers
-        eps: Small constant for numerical stability
+    Returns new params dict with modulated weights.
     """
-    in_chan: int = 3
-    out_chan: int = 3
-    mid_chan: int = 64
-    eps: float = 1e-8
-    dtype: jnp.dtype = jnp.float32
+
+    Dz = D(z, Om)
     
-    def setup(self):
-        """Initialize all network layers."""
-        mid_chan_1 = self.mid_chan
-        mid_chan_2 = 2 * mid_chan_1  # For concatenation with skip connections
-        
-        # Encoder Path (Downsampling)
-        self.conv_l00 = ResNetBlock3D(
-            'CACA', self.in_chan, mid_chan_1, eps=self.eps, dtype=self.dtype
-        )
-        self.conv_l01 = ResNetBlock3D(
-            'CACA', mid_chan_1, mid_chan_1, eps=self.eps, dtype=self.dtype
-        )
-        self.down_l0 = ResampleBlock3D(
-            'DA', mid_chan_1, mid_chan_1, eps=self.eps, dtype=self.dtype
-        )
-        
-        self.conv_l1 = ResNetBlock3D(
-            'CACA', mid_chan_1, mid_chan_1, eps=self.eps, dtype=self.dtype
-        )
-        self.down_l1 = ResampleBlock3D(
-            'DA', mid_chan_1, mid_chan_1, eps=self.eps, dtype=self.dtype
-        )
-        
-        self.conv_l2 = ResNetBlock3D(
-            'CACA', mid_chan_1, mid_chan_1, eps=self.eps, dtype=self.dtype
-        )
-        self.down_l2 = ResampleBlock3D(
-            'DA', mid_chan_1, mid_chan_1, eps=self.eps, dtype=self.dtype
-        )
-        
-        # Bottleneck
-        self.conv_c = ResNetBlock3D(
-            'CACA', mid_chan_1, mid_chan_1, eps=self.eps, dtype=self.dtype
-        )
-        
-        # Decoder Path (Upsampling)
-        self.up_r2 = ResampleBlock3D(
-            'UA', mid_chan_1, mid_chan_1, eps=self.eps, dtype=self.dtype
-        )
-        self.conv_r2 = ResNetBlock3D(
-            'CACA', mid_chan_2, mid_chan_1, eps=self.eps, dtype=self.dtype
-        )
-        
-        self.up_r1 = ResampleBlock3D(
-            'UA', mid_chan_1, mid_chan_1, eps=self.eps, dtype=self.dtype
-        )
-        self.conv_r1 = ResNetBlock3D(
-            'CACA', mid_chan_2, mid_chan_1, eps=self.eps, dtype=self.dtype
-        )
-        
-        self.up_r0 = ResampleBlock3D(
-            'UA', mid_chan_1, mid_chan_1, eps=self.eps, dtype=self.dtype
-        )
-        self.conv_r00 = ResNetBlock3D(
-            'CACA', mid_chan_2, mid_chan_1, eps=self.eps, dtype=self.dtype
-        )
-        self.conv_r01 = ResNetBlock3D(
-            'CAC', mid_chan_1, self.out_chan, eps=self.eps, dtype=self.dtype
-        )
+    # Compute style vector
+    s0 = (Om - 0.3) * 5.
+    s1 = Dz - 1.
+    s = jnp.stack([s0, s1], axis=-1)
     
-    def __call__(self, x, Dz):
-        """
-        Forward pass of the NBodyEmulator.
-        
-        Args:
-            x: Input 3D data tensor of shape (B, C_in, D, H, W)
-            Dz: Linear growth factors at output redshifts of shape (B,)
-            
-        Returns:
-            displacement:
-                - displacement: Predicted displacement field (B, C_out, D', H', W')
-                - ocity: Predicted ocity field (B, C_out, D', H', W')
-        """
-        
-        
-        if Dz.ndim == 0 :
-            Dz = Dz[None]
+    # Process each block
+    processed_params = {'params':{}}
+    # Process each block
+    for block_name, block_params in params['params'].items():
+        processed_params['params'][block_name] = {}
+        for layer_name, layer_params in block_params.items():
+            if 'style_weight' in layer_params:
+                # Only the first block's conv_0 and skip layers have input that is linear in Dz
+                if block_name == 'conv_l00' and (layer_name == 'conv_0' or layer_name == 'skip') :
+                    dx = None
+                else :
+                    dx = 1
+                # This layer has style modulation - preprocess it
+                w_norm, dw_norm = _modulate_weights_vel(
+                    layer_params['style_weight'],
+                    layer_params['style_bias'],
+                    layer_params['weight'],
+                    s,
+                    dx=dx,
+                    eps=eps
+                )
+                processed_params['params'][block_name][layer_name] = {
+                    'weight': w_norm[0],
+                    'dweight': dw_norm[0],
+                    'bias': layer_params['bias']
+                }
+            else:
+                # Pass through unmodified
+                print(f'skipping {block_name} {layer_name}')
+                processed_params['params'][block_name][layer_name] = layer_params
 
-        Dz = Dz.astype(self.dtype)[:, None, None, None, None]
-        
-        # Apply growth factor scaling to input
-        # Factor of 6 is from original model input normalization
-        x = x * (Dz / 6.)
-        dx = None  # Will be computed by first layer
-        
-        # Store cropped input for final residual connection
-        # Assumes input spatial dimensions are large enough (e.g., 256^3)
-        x0 = x[:, :, 48:-48, 48:-48, 48:-48]
-        
-        # ===== Encoder Path =====
-        x = self.conv_l00(x)
-        y0 = self.conv_l01(x)
-        
-        x = self.down_l0(y0)
-        # Crop skip connection to match decoder dimensions
-        y0 = y0[:, :, 40:-40, 40:-40, 40:-40]
-        
-        y1 = self.conv_l1(x)
-        x = self.down_l1(y1)
-        # Crop skip connection
-        y1 = y1[:, :, 16:-16, 16:-16, 16:-16]
-        
-        y2 = self.conv_l2(x)
-        x = self.down_l2(y2)
-        # Crop skip connection
-        y2 = y2[:, :, 4:-4, 4:-4, 4:-4]
-        
-        # ===== Bottleneck =====
-        x = self.conv_c(x)
+    return processed_params
 
-        # ===== Decoder Path =====
-        x = self.up_r2(x)
-        # Concatenate with skip connection
-        x = jnp.concatenate([y2, x], axis=1)
-        x = self.conv_r2(x)
-
-        x = self.up_r1(x)
-        # Concatenate with skip connection
-        x = jnp.concatenate([y1, x], axis=1)
-        x = self.conv_r1(x)
-
-        x = self.up_r0(x)
-        # Concatenate with skip connection
-        x = jnp.concatenate([y0, x], axis=1)
-        x = self.conv_r00(x)
-        x = self.conv_r01(x)
-
-        # ===== Final Residual Connection =====
-        # Displacement field
-        displacement = (x + x0) * 6.
+def create_emulator(
+    premodulate: bool = False,
+    compute_vel: bool = True,
+    load_params: bool = True,
+    processor_config: SubboxConfig | None = None,
+    premodulate_z: float | None = None,
+    premodulate_Om: float | None = None,
+    dtype: jnp.dtype | None = None,
+    **model_kwargs
+) -> NBodyEmulator:
+    """
+    Factory function to create emulator, optionally with params and processor.
+    
+    Args:
+        premodulate: If True, premodulate params at creation time (fixed cosmology).
+                     If False, use Style models (Om passed at runtime).
+        compute_vel: If True, model returns both displacement and velocity.
+        load_params: If True, load default pretrained parameters.
+        processor_config: SubboxConfig for processor (creates processor only if not None).
+        premodulate_z: If premodulate=True and load_params=True, premodulate 
+                              params at this redshift (required with premodulate_Om).
+        premodulate_Om: If premodulate=True and load_params=True, premodulate
+                               params at this Omega_matter.
+        dtype: dtype of convolution (jnp.float32 or jnp.float16), overwritten by
+                    processor_config.dtype if present, otherwise defaults to jnp.float32
+        **model_kwargs: Passed to model constructor (in_chan, out_chan, mid_chan, eps).
+    
+    Returns:
+        NBodyEmulator bundle with model, params, and processor.
         
-        return displacement
+    Raises:
+        ValueError: If required arguments are missing.
+        
+    Examples:
+        # Style model with velocity (Om at runtime)
+        emulator = create_emulator(
+            premodulate=False,
+            compute_vel=True,
+            load_params=True,
+            processor_config=config,
+        )
+        disp, vel = emulator.process_box(input_box, z=0.0, Om=0.3)
+        
+        # Fixed-cosmology model (Om and z baked into params)
+        emulator = create_emulator(
+            premodulate=True,
+            compute_vel=False,
+            load_params=True,
+            processor_config=config,
+            premodulate_z=0.0,
+            premodulate_Om=0.3,
+        )
+        disp = emulator.process_box(input_box, z=0.0, Om=0.3)
+    """
+    
+    # Create model
+    if premodulate:
+        # Premodulate params - use non-style models
+        if compute_vel:
+            from .nbody_emulator_vel_core import NBodyEmulatorVelCore
+            model = NBodyEmulatorVelCore(**model_kwargs)
+        else:
+            from .nbody_emulator_core import NBodyEmulatorCore
+            model = NBodyEmulatorCore(**model_kwargs)
+    else:
+        # Don't premodulate - use style models (Om at runtime)
+        if compute_vel:
+            from .style_nbody_emulator_vel_core import StyleNBodyEmulatorVelCore
+            model = StyleNBodyEmulatorVelCore(**model_kwargs)
+        else:
+            from .style_nbody_emulator_core import StyleNBodyEmulatorCore
+            model = StyleNBodyEmulatorCore(**model_kwargs)
+    
+    # Load parameters
+    params = None
+    if load_params:
+        params = load_default_parameters()
+        
+        # Premodulate params if requested
+        if premodulate:
+            if premodulate_z is None or premodulate_Om is None:
+                raise ValueError(
+                    "premodulate_z and premodulate_Om are required "
+                    "when premodulate=True and load_params=True"
+                )
+            if compute_vel:
+                from .nbody_emulator_vel_core import modulate_emulator_parameters_vel
+                params = modulate_emulator_parameters_vel(
+                    params, 
+                    premodulate_z, 
+                    premodulate_Om 
+                )
+            else:
+                from .nbody_emulator_core import modulate_emulator_parameters
+                params = modulate_emulator_parameters(
+                    params, 
+                    premodulate_z, 
+                    premodulate_Om, 
+                )
+    
+    # Create processor
+    processor = None
+    if processor_config is not None:
+        processor = SubboxProcessor(model, params, processor_config)
+
+    # Set dtype based on processor_config (overwrites) or chosen dtype
+    if processor_config is not None :
+        dtype = processor_config.dtype
+    elif dtype is None :
+        dtype = jnp.float32
+    
+    return NBodyEmulator(
+        model=model,
+        params=params,
+        processor=processor,
+        premodulate=premodulate,
+        compute_vel=compute_vel,
+        dtype=dtype
+    )

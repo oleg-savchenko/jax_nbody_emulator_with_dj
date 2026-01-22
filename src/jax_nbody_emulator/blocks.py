@@ -29,7 +29,6 @@ class ResampleBlock3D(nn.Module):
     in_chan: int
     out_chan: int
     eps: float = 1e-8
-    dtype: jnp.dtype = jnp.float32
     
     @nn.compact
     def __call__(self, x):
@@ -49,8 +48,7 @@ class ResampleBlock3D(nn.Module):
                     in_chan=current_in_chan,
                     out_chan=current_out_chan,
                     eps=self.eps,
-                    name=f'conv_{conv_idx}',
-                    dtype=self.dtype
+                    name=f'conv_{conv_idx}'
                 )
                 x = layer(x)
                 conv_idx += 1
@@ -63,14 +61,13 @@ class ResampleBlock3D(nn.Module):
                     in_chan=current_in_chan,
                     out_chan=current_out_chan,
                     eps=self.eps,
-                    name=f'conv_{conv_idx}',
-                    dtype=self.dtype
+                    name=f'conv_{conv_idx}'
                 )
                 x = layer(x)
                 conv_idx += 1
                 
             elif layer_type == 'A':
-                layer = LeakyReLU(name=f'act_{act_idx}', dtype=self.dtype)
+                layer = LeakyReLU(name=f'act_{act_idx}')
                 x = layer(x)
                 act_idx += 1
                 
@@ -85,7 +82,6 @@ class ResNetBlock3D(nn.Module):
     in_chan: int
     out_chan: int
     eps: float = 1e-8
-    dtype: jnp.dtype = jnp.float32
     
     @nn.compact
     def __call__(self, x):
@@ -103,8 +99,7 @@ class ResNetBlock3D(nn.Module):
             in_chan=self.in_chan,
             out_chan=self.out_chan,
             eps=self.eps,
-            name='skip',
-            dtype=self.dtype
+            name='skip'
         )
         y = skip(x)
         
@@ -131,14 +126,13 @@ class ResNetBlock3D(nn.Module):
                     in_chan=current_in_chan,
                     out_chan=current_out_chan,
                     eps=self.eps,
-                    name=f'conv_{conv_idx}',
-                    dtype=self.dtype
+                    name=f'conv_{conv_idx}'
                 )
                 x = layer(x)
                 conv_idx += 1
                 
             elif layer_type == 'A':
-                layer = LeakyReLU(name=f'act_{act_idx}', dtype=self.dtype)
+                layer = LeakyReLU(name=f'act_{act_idx}')
                 x = layer(x)
                 act_idx += 1
                 
@@ -153,8 +147,7 @@ class ResNetBlock3D(nn.Module):
         
         # Optional final activation
         if last_act:
-            act = LeakyReLU(name='final_act', dtype=self.dtype)
+            act = LeakyReLU(name='final_act')
             x = act(x)
         
         return x
-

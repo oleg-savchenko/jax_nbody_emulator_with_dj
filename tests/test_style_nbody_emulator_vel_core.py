@@ -1,5 +1,5 @@
 """
-Tests for style_nbody_emulator_vel.py module.
+Tests for style_nbody_emulator_vel_core.py module.
 
 Main N-body emulator model implementation with style conditioning and
 velocity computation using manual forward-mode automatic differentiation.
@@ -14,26 +14,25 @@ import jax
 import jax.numpy as jnp
 import jax.random as random
 
-from jax_nbody_emulator.style_nbody_emulator_vel import StyleNBodyEmulatorVel
+from jax_nbody_emulator.style_nbody_emulator_vel_core import StyleNBodyEmulatorVelCore
 
 
-class TestStyleNBodyEmulatorVelInitialization:
-    """Test StyleNBodyEmulatorVel initialization"""
+class TestStyleNBodyEmulatorVelCoreInitialization:
+    """Test StyleNBodyEmulatorVelCore initialization"""
     
     def test_default_initialization(self):
         """Test that model initializes with default parameters"""
-        model = StyleNBodyEmulatorVel()
+        model = StyleNBodyEmulatorVelCore()
         
         assert model.style_size == 2
         assert model.in_chan == 3
         assert model.out_chan == 3
         assert model.mid_chan == 64
         assert model.eps == 1e-8
-        assert model.dtype == jnp.float32
     
     def test_custom_channels(self):
         """Test model with custom channel configuration"""
-        model = StyleNBodyEmulatorVel(
+        model = StyleNBodyEmulatorVelCore(
             in_chan=1,
             out_chan=1,
             mid_chan=32
@@ -45,24 +44,18 @@ class TestStyleNBodyEmulatorVelInitialization:
     
     def test_custom_style_size(self):
         """Test model with custom style size"""
-        model = StyleNBodyEmulatorVel(style_size=4)
+        model = StyleNBodyEmulatorVelCore(style_size=4)
         
         assert model.style_size == 4
-    
-    def test_custom_dtype(self):
-        """Test model with custom dtype"""
-        model = StyleNBodyEmulatorVel(dtype=jnp.float16)
-        
-        assert model.dtype == jnp.float16
 
 
-class TestStyleNBodyEmulatorVelForwardPass:
-    """Test StyleNBodyEmulatorVel forward pass"""
+class TestStyleNBodyEmulatorVelCoreForwardPass:
+    """Test StyleNBodyEmulatorVelCore forward pass"""
     
     def test_returns_tuple(self):
         """Test that forward pass returns (displacement, velocity) tuple"""
         key = random.PRNGKey(42)
-        model = StyleNBodyEmulatorVel()
+        model = StyleNBodyEmulatorVelCore()
         
         spatial_size = 128
         x = random.normal(key, (1, 3, spatial_size, spatial_size, spatial_size))
@@ -79,7 +72,7 @@ class TestStyleNBodyEmulatorVelForwardPass:
     def test_forward_pass_shape(self):
         """Test that forward pass produces correct output shapes"""
         key = random.PRNGKey(42)
-        model = StyleNBodyEmulatorVel()
+        model = StyleNBodyEmulatorVelCore()
         
         batch_size = 1
         spatial_size = 128  # Output will be 128 - 96 = 32
@@ -99,7 +92,7 @@ class TestStyleNBodyEmulatorVelForwardPass:
     def test_larger_input(self):
         """Test with larger input spatial size"""
         key = random.PRNGKey(42)
-        model = StyleNBodyEmulatorVel()
+        model = StyleNBodyEmulatorVelCore()
         
         batch_size = 1
         spatial_size = 160  # Output will be 160 - 96 = 64
@@ -118,7 +111,7 @@ class TestStyleNBodyEmulatorVelForwardPass:
     def test_batch_processing(self):
         """Test that model handles batched inputs correctly"""
         key = random.PRNGKey(42)
-        model = StyleNBodyEmulatorVel()
+        model = StyleNBodyEmulatorVelCore()
         
         batch_size = 2
         spatial_size = 128
@@ -138,7 +131,7 @@ class TestStyleNBodyEmulatorVelForwardPass:
     def test_outputs_finite(self):
         """Test that output values are finite"""
         key = random.PRNGKey(42)
-        model = StyleNBodyEmulatorVel()
+        model = StyleNBodyEmulatorVelCore()
         
         spatial_size = 128
         x = random.normal(key, (1, 3, spatial_size, spatial_size, spatial_size))
@@ -153,13 +146,13 @@ class TestStyleNBodyEmulatorVelForwardPass:
         assert jnp.all(jnp.isfinite(velocity))
 
 
-class TestStyleNBodyEmulatorVelVelocity:
+class TestStyleNBodyEmulatorVelCoreVelocity:
     """Test velocity-specific behavior"""
     
     def test_velocity_scaling_with_vel_fac(self):
         """Test that velocity scales with vel_fac parameter"""
         key = random.PRNGKey(42)
-        model = StyleNBodyEmulatorVel()
+        model = StyleNBodyEmulatorVelCore()
         
         spatial_size = 128
         x = random.normal(key, (1, 3, spatial_size, spatial_size, spatial_size))
@@ -180,7 +173,7 @@ class TestStyleNBodyEmulatorVelVelocity:
     def test_displacement_independent_of_vel_fac(self):
         """Test that displacement is independent of vel_fac"""
         key = random.PRNGKey(42)
-        model = StyleNBodyEmulatorVel()
+        model = StyleNBodyEmulatorVelCore()
         
         spatial_size = 128
         x = random.normal(key, (1, 3, spatial_size, spatial_size, spatial_size))
@@ -199,7 +192,7 @@ class TestStyleNBodyEmulatorVelVelocity:
     def test_velocity_not_zero(self):
         """Test that velocity output is non-zero"""
         key = random.PRNGKey(42)
-        model = StyleNBodyEmulatorVel()
+        model = StyleNBodyEmulatorVelCore()
         
         spatial_size = 128
         x = random.normal(key, (1, 3, spatial_size, spatial_size, spatial_size))
@@ -218,7 +211,7 @@ class TestStyleNBodyEmulatorVelVelocity:
     def test_velocity_differs_from_displacement(self):
         """Test that velocity and displacement are different"""
         key = random.PRNGKey(42)
-        model = StyleNBodyEmulatorVel()
+        model = StyleNBodyEmulatorVelCore()
         
         spatial_size = 128
         x = random.normal(key, (1, 3, spatial_size, spatial_size, spatial_size))
@@ -233,13 +226,13 @@ class TestStyleNBodyEmulatorVelVelocity:
         assert not jnp.allclose(displacement, velocity)
 
 
-class TestStyleNBodyEmulatorVelCosmology:
+class TestStyleNBodyEmulatorVelCoreCosmology:
     """Test cosmological parameter handling"""
     
     def test_cosmology_affects_displacement(self):
         """Test that cosmology parameters affect displacement"""
         key = random.PRNGKey(42)
-        model = StyleNBodyEmulatorVel()
+        model = StyleNBodyEmulatorVelCore()
         
         spatial_size = 128
         x = random.normal(key, (1, 3, spatial_size, spatial_size, spatial_size))
@@ -255,7 +248,7 @@ class TestStyleNBodyEmulatorVelCosmology:
     def test_cosmology_affects_velocity(self):
         """Test that cosmology parameters affect velocity"""
         key = random.PRNGKey(42)
-        model = StyleNBodyEmulatorVel()
+        model = StyleNBodyEmulatorVelCore()
         
         spatial_size = 128
         x = random.normal(key, (1, 3, spatial_size, spatial_size, spatial_size))
@@ -271,7 +264,7 @@ class TestStyleNBodyEmulatorVelCosmology:
     def test_dz_scaling_affects_both_outputs(self):
         """Test that Dz affects both displacement and velocity"""
         key = random.PRNGKey(42)
-        model = StyleNBodyEmulatorVel()
+        model = StyleNBodyEmulatorVelCore()
         
         spatial_size = 128
         x = random.normal(key, (1, 3, spatial_size, spatial_size, spatial_size))
@@ -287,13 +280,13 @@ class TestStyleNBodyEmulatorVelCosmology:
         assert not jnp.allclose(vel1, vel2)
 
 
-class TestStyleNBodyEmulatorVelDtype:
+class TestStyleNBodyEmulatorVelCoreDtype:
     """Test dtype handling"""
     
     def test_dtype_fp32(self):
         """Test model with FP32 precision (default)"""
         key = random.PRNGKey(42)
-        model = StyleNBodyEmulatorVel(dtype=jnp.float32)
+        model = StyleNBodyEmulatorVelCore()
         
         spatial_size = 128
         x = random.normal(key, (1, 3, spatial_size, spatial_size, spatial_size))
@@ -310,13 +303,13 @@ class TestStyleNBodyEmulatorVelDtype:
     def test_dtype_fp16(self):
         """Test model with FP16 precision"""
         key = random.PRNGKey(42)
-        model = StyleNBodyEmulatorVel(dtype=jnp.float16)
+        model = StyleNBodyEmulatorVelCore()
         
         spatial_size = 128
         x = random.normal(key, (1, 3, spatial_size, spatial_size, spatial_size)).astype(jnp.float16)
-        Om = jnp.array([0.3], dtype=jnp.float16)
-        Dz = jnp.array([1.0], dtype=jnp.float16)
-        vel_fac = jnp.array([100.0], dtype=jnp.float16)
+        Om = jnp.array([0.3])
+        Dz = jnp.array([1.0])
+        vel_fac = jnp.array([100.0])
         
         params = model.init(key, x, Om, Dz, vel_fac)
         displacement, velocity = model.apply(params, x, Om, Dz, vel_fac)
@@ -327,13 +320,13 @@ class TestStyleNBodyEmulatorVelDtype:
     def test_dtype_bfloat16(self):
         """Test model with BF16 precision"""
         key = random.PRNGKey(42)
-        model = StyleNBodyEmulatorVel(dtype=jnp.bfloat16)
+        model = StyleNBodyEmulatorVelCore()
         
         spatial_size = 128
         x = random.normal(key, (1, 3, spatial_size, spatial_size, spatial_size)).astype(jnp.bfloat16)
-        Om = jnp.array([0.3], dtype=jnp.bfloat16)
-        Dz = jnp.array([1.0], dtype=jnp.bfloat16)
-        vel_fac = jnp.array([100.0], dtype=jnp.bfloat16)
+        Om = jnp.array([0.3])
+        Dz = jnp.array([1.0])
+        vel_fac = jnp.array([100.0])
         
         params = model.init(key, x, Om, Dz, vel_fac)
         displacement, velocity = model.apply(params, x, Om, Dz, vel_fac)
@@ -342,13 +335,13 @@ class TestStyleNBodyEmulatorVelDtype:
         assert velocity.dtype == jnp.bfloat16
 
 
-class TestStyleNBodyEmulatorVelJAXCompatibility:
+class TestStyleNBodyEmulatorVelCoreJAXCompatibility:
     """Test JAX-specific functionality"""
     
     def test_jit_compilation(self):
         """Test that model can be JIT compiled"""
         key = random.PRNGKey(42)
-        model = StyleNBodyEmulatorVel()
+        model = StyleNBodyEmulatorVelCore()
         
         spatial_size = 128
         x = random.normal(key, (1, 3, spatial_size, spatial_size, spatial_size))
@@ -371,7 +364,7 @@ class TestStyleNBodyEmulatorVelJAXCompatibility:
     def test_gradient_computation(self):
         """Test that gradients can be computed"""
         key = random.PRNGKey(42)
-        model = StyleNBodyEmulatorVel()
+        model = StyleNBodyEmulatorVelCore()
         
         spatial_size = 128
         x = random.normal(key, (1, 3, spatial_size, spatial_size, spatial_size))
@@ -392,13 +385,13 @@ class TestStyleNBodyEmulatorVelJAXCompatibility:
         assert all(jnp.all(jnp.isfinite(g)) for g in grad_leaves)
 
 
-class TestStyleNBodyEmulatorVelParameterStructure:
+class TestStyleNBodyEmulatorVelCoreParameterStructure:
     """Test parameter structure"""
     
     def test_parameter_structure(self):
         """Test that parameters have expected structure"""
         key = random.PRNGKey(42)
-        model = StyleNBodyEmulatorVel()
+        model = StyleNBodyEmulatorVelCore()
         
         spatial_size = 128
         x = random.normal(key, (1, 3, spatial_size, spatial_size, spatial_size))
@@ -429,10 +422,10 @@ class TestStyleNBodyEmulatorVelParameterStructure:
         """Test that parameter count matches non-velocity version"""
         key = random.PRNGKey(42)
         
-        from jax_nbody_emulator.style_nbody_emulator import StyleNBodyEmulator
+        from jax_nbody_emulator.style_nbody_emulator_core import StyleNBodyEmulatorCore
         
-        model_vel = StyleNBodyEmulatorVel()
-        model_std = StyleNBodyEmulator()
+        model_vel = StyleNBodyEmulatorVelCore()
+        model_std = StyleNBodyEmulatorCore()
         
         spatial_size = 128
         x = random.normal(key, (1, 3, spatial_size, spatial_size, spatial_size))
@@ -455,7 +448,7 @@ class TestStyleNBodyEmulatorVelParameterStructure:
     def test_all_parameters_finite(self):
         """Test that all initialized parameters are finite"""
         key = random.PRNGKey(42)
-        model = StyleNBodyEmulatorVel()
+        model = StyleNBodyEmulatorVelCore()
         
         spatial_size = 128
         x = random.normal(key, (1, 3, spatial_size, spatial_size, spatial_size))
@@ -469,13 +462,13 @@ class TestStyleNBodyEmulatorVelParameterStructure:
             assert jnp.all(jnp.isfinite(leaf))
 
 
-class TestStyleNBodyEmulatorVelEdgeCases:
+class TestStyleNBodyEmulatorVelCoreEdgeCases:
     """Test edge cases and numerical stability"""
     
     def test_zero_input(self):
         """Test model behavior with zero input"""
         key = random.PRNGKey(42)
-        model = StyleNBodyEmulatorVel()
+        model = StyleNBodyEmulatorVelCore()
         
         spatial_size = 128
         x = jnp.zeros((1, 3, spatial_size, spatial_size, spatial_size))
@@ -496,7 +489,7 @@ class TestStyleNBodyEmulatorVelEdgeCases:
     def test_extreme_cosmology_low(self):
         """Test with low cosmology values"""
         key = random.PRNGKey(42)
-        model = StyleNBodyEmulatorVel()
+        model = StyleNBodyEmulatorVelCore()
         
         spatial_size = 128
         x = random.normal(key, (1, 3, spatial_size, spatial_size, spatial_size))
@@ -514,7 +507,7 @@ class TestStyleNBodyEmulatorVelEdgeCases:
     def test_extreme_cosmology_high(self):
         """Test with high cosmology values"""
         key = random.PRNGKey(42)
-        model = StyleNBodyEmulatorVel()
+        model = StyleNBodyEmulatorVelCore()
         
         spatial_size = 128
         x = random.normal(key, (1, 3, spatial_size, spatial_size, spatial_size))
@@ -532,13 +525,13 @@ class TestStyleNBodyEmulatorVelEdgeCases:
     def test_numerical_stability_fp16(self):
         """Test numerical stability with FP16"""
         key = random.PRNGKey(42)
-        model = StyleNBodyEmulatorVel(dtype=jnp.float16)
+        model = StyleNBodyEmulatorVelCore()
         
         spatial_size = 128
         x = random.normal(key, (1, 3, spatial_size, spatial_size, spatial_size)).astype(jnp.float16)
-        Om = jnp.array([0.3], dtype=jnp.float16)
-        Dz = jnp.array([1.0], dtype=jnp.float16)
-        vel_fac = jnp.array([100.0], dtype=jnp.float16)
+        Om = jnp.array([0.3])
+        Dz = jnp.array([1.0])
+        vel_fac = jnp.array([100.0])
         
         params = model.init(key, x, Om, Dz, vel_fac)
         displacement, velocity = model.apply(params, x, Om, Dz, vel_fac)
@@ -551,7 +544,7 @@ class TestStyleNBodyEmulatorVelEdgeCases:
     def test_small_input_values(self):
         """Test with very small input values"""
         key = random.PRNGKey(42)
-        model = StyleNBodyEmulatorVel()
+        model = StyleNBodyEmulatorVelCore()
         
         spatial_size = 128
         x = random.normal(key, (1, 3, spatial_size, spatial_size, spatial_size)) * 1e-6
@@ -568,7 +561,7 @@ class TestStyleNBodyEmulatorVelEdgeCases:
     def test_large_input_values(self):
         """Test with large input values"""
         key = random.PRNGKey(42)
-        model = StyleNBodyEmulatorVel()
+        model = StyleNBodyEmulatorVelCore()
         
         spatial_size = 128
         x = random.normal(key, (1, 3, spatial_size, spatial_size, spatial_size)) * 1e3
@@ -585,7 +578,7 @@ class TestStyleNBodyEmulatorVelEdgeCases:
     def test_small_dz_value(self):
         """Test behavior with small Dz value"""
         key = random.PRNGKey(42)
-        model = StyleNBodyEmulatorVel()
+        model = StyleNBodyEmulatorVelCore()
         
         spatial_size = 128
         x = random.normal(key, (1, 3, spatial_size, spatial_size, spatial_size))
@@ -601,17 +594,17 @@ class TestStyleNBodyEmulatorVelEdgeCases:
         assert jnp.all(jnp.isfinite(velocity))
 
 
-class TestStyleNBodyEmulatorVelModelComparison:
+class TestStyleNBodyEmulatorVelCoreModelComparison:
     """Compare behavior with non-velocity model"""
     
     def test_displacement_consistency(self):
         """Test that displacement output is similar to non-velocity model"""
         key = random.PRNGKey(42)
         
-        from jax_nbody_emulator.style_nbody_emulator import StyleNBodyEmulator
+        from jax_nbody_emulator.style_nbody_emulator_core import StyleNBodyEmulatorCore
         
-        model_dis = StyleNBodyEmulator()
-        model_vel = StyleNBodyEmulatorVel()
+        model_dis = StyleNBodyEmulatorCore()
+        model_vel = StyleNBodyEmulatorVelCore()
         
         spatial_size = 128
         x = random.normal(key, (1, 3, spatial_size, spatial_size, spatial_size))
@@ -638,10 +631,10 @@ class TestStyleNBodyEmulatorVelModelComparison:
         """Test that both models have same architecture"""
         key = random.PRNGKey(42)
         
-        from jax_nbody_emulator.style_nbody_emulator import StyleNBodyEmulator
+        from jax_nbody_emulator.style_nbody_emulator_core import StyleNBodyEmulatorCore
         
-        model_dis = StyleNBodyEmulator()
-        model_vel = StyleNBodyEmulatorVel()
+        model_dis = StyleNBodyEmulatorCore()
+        model_vel = StyleNBodyEmulatorVelCore()
         
         spatial_size = 128
         x = random.normal(key, (1, 3, spatial_size, spatial_size, spatial_size))
@@ -658,13 +651,13 @@ class TestStyleNBodyEmulatorVelModelComparison:
         assert keys_dis == keys_vel
 
 
-class TestStyleNBodyEmulatorVelResidualConnection:
+class TestStyleNBodyEmulatorVelCoreResidualConnection:
     """Test residual connection and tangent propagation"""
     
     def test_residual_connection_working(self):
         """Test that residual connection is working"""
         key = random.PRNGKey(42)
-        model = StyleNBodyEmulatorVel()
+        model = StyleNBodyEmulatorVelCore()
         
         spatial_size = 128
         x = jnp.ones((1, 3, spatial_size, spatial_size, spatial_size)) * 0.5
@@ -682,7 +675,7 @@ class TestStyleNBodyEmulatorVelResidualConnection:
     def test_tangent_propagation_through_network(self):
         """Test that tangents propagate correctly through the network"""
         key = random.PRNGKey(42)
-        model = StyleNBodyEmulatorVel()
+        model = StyleNBodyEmulatorVelCore()
         
         spatial_size = 128
         x = random.normal(key, (1, 3, spatial_size, spatial_size, spatial_size))

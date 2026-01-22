@@ -29,7 +29,6 @@ class StyleConvBase3D(nn.Module):
     stride: int = 1
     style_size: int = 2
     eps: float = 1e-8
-    dtype: jnp.dtype = jnp.float32
 
     @nn.compact
     def __call__(self, x, s):
@@ -52,12 +51,10 @@ class StyleConvBase3D(nn.Module):
         # Style transformation
         style_weight = self.param('style_weight', 
                                    nn.initializers.lecun_normal(),
-                                   (self.in_chan, self.style_size),
-                                   self.dtype)
+                                   (self.in_chan, self.style_size))
         style_bias = self.param('style_bias',
                                nn.initializers.ones,
-                               (self.in_chan,),
-                               self.dtype)
+                               (self.in_chan,))
         
         s_mod = jnp.dot(s, style_weight.T) + style_bias
         
@@ -65,12 +62,10 @@ class StyleConvBase3D(nn.Module):
         kernel_shape = (self.kernel_size,) * 3
         weight = self.param('weight',
                            nn.initializers.lecun_normal(),
-                           (self.out_chan, self.in_chan, *kernel_shape), 
-                           self.dtype)
+                           (self.out_chan, self.in_chan, *kernel_shape))
         bias = self.param('bias',
                          nn.initializers.zeros,
-                         (self.out_chan,),
-                         self.dtype)
+                         (self.out_chan,))
         
         # Weight modulation
         # s_mod: (B, C_in) -> (B, 1, C_in, 1, 1, 1)
@@ -80,10 +75,11 @@ class StyleConvBase3D(nn.Module):
         w = weight[None] * s_mod
         
         # Demodulation (normalize over spatial + input channels)
-        norm = jnp.sqrt(jnp.sum(w**2, axis=(2,3,4,5), keepdims=True) + jnp.array(self.eps, dtype=self.dtype))
+        norm = jnp.sqrt(jnp.sum(w**2, axis=(2,3,4,5), keepdims=True) + jnp.array(self.eps))
         
-        w_normalized = w / norm
-        
+        w_normalized = (w / norm).astype(x.dtype)
+        bias = bias.astype(x.dtype)        
+
         # Convolution using vmap
         def single_conv(x_i, w_i, b_i):
             out = jax.lax.conv_general_dilated(
@@ -122,7 +118,6 @@ class StyleConvTransposeBase3D(nn.Module):
     stride: int = 1
     style_size: int = 2
     eps: float = 1e-8
-    dtype: jnp.dtype = jnp.float32
     
     @nn.compact
     def __call__(self, x, s):
@@ -145,12 +140,10 @@ class StyleConvTransposeBase3D(nn.Module):
         # Style transformation
         style_weight = self.param('style_weight', 
                                    nn.initializers.lecun_normal(),
-                                   (self.in_chan, self.style_size),
-                                   self.dtype)
+                                   (self.in_chan, self.style_size))
         style_bias = self.param('style_bias',
                                nn.initializers.ones,
-                               (self.in_chan,),
-                               self.dtype)
+                               (self.in_chan,))
         
         s_mod = jnp.dot(s, style_weight.T) + style_bias
         
@@ -158,12 +151,10 @@ class StyleConvTransposeBase3D(nn.Module):
         kernel_shape = (self.kernel_size,) * 3
         weight = self.param('weight',
                            nn.initializers.lecun_normal(),
-                           (self.out_chan, self.in_chan, *kernel_shape),
-                           self.dtype)
+                           (self.out_chan, self.in_chan, *kernel_shape))
         bias = self.param('bias',
                          nn.initializers.zeros,
-                         (self.out_chan,),
-                         self.dtype)
+                         (self.out_chan,))
         
         # Weight modulation
         s_mod = s_mod[:, None, :, None, None, None]
@@ -171,9 +162,10 @@ class StyleConvTransposeBase3D(nn.Module):
         w = weight[None] * s_mod
         
         # Demodulation
-        norm = jnp.sqrt(jnp.sum(w**2, axis=(2,3,4,5), keepdims=True) + jnp.array(self.eps, dtype=self.dtype))
+        norm = jnp.sqrt(jnp.sum(w**2, axis=(2,3,4,5), keepdims=True) + jnp.array(self.eps))
         
-        w_normalized = w / norm
+        w_normalized = (w / norm).astype(x.dtype)
+        bias = bias.astype(x.dtype)
         
         def single_upsample_conv(x_i, w_i, b_i):
             out = jax.lax.conv_general_dilated(
@@ -202,4 +194,4 @@ class StyleConvTransposeBase3D(nn.Module):
 StyleConv3D = partial(StyleConvBase3D, kernel_size=3, stride=1)
 StyleSkip3D = partial(StyleConvBase3D, kernel_size=1, stride=1)
 StyleDownSample3D = partial(StyleConvBase3D, kernel_size=2, stride=2)
-StyleUpSample3D = StyleConvTransposeBase3D  # No partial needed, defaults are correct
+StyleUpSample3D = StyleConvTransposeBase3D

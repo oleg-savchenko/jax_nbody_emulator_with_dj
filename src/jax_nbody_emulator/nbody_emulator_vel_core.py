@@ -1,7 +1,7 @@
 """
 Main N-body emulator model implementation.
 
-This module contains the primary NBodyEmulatorVel class that implements
+This module contains the primary NBodyEmulatorVelCore class that implements
 a 3D U-Net-like architecture for cosmological
 N-body simulations.
 
@@ -19,95 +19,9 @@ import jax
 import jax.numpy as jnp
 import flax.linen as nn
 
-from .cosmology import D
 from .blocks_vel import ResNetBlock3DVel, ResampleBlock3DVel
 
-def _modulate_weights_vel(style_weight, style_bias, weight, s, dx=None, eps = 1.e-8) :
-
-        if s.ndim == 1:
-            s = s[None]
-
-        s = jnp.array(s, dtype=style_weight.dtype)
-        
-        s_mod = jnp.dot(s, style_weight.T) + style_bias
-        # s_mod: (B, C_in) -> (B, 1, C_in, 1, 1, 1)
-        s_mod = s_mod[:, None, :, None, None, None]
-        ds = jnp.zeros_like(s).at[:, 1].set(1.0)
-        ds_mod = jnp.dot(ds, style_weight.T)
-        ds_mod = ds_mod[:, None, :, None, None, None]
-        
-        # w: (C_out, C_in, K, K, K) -> (B, C_out, C_in, K, K, K)
-        w = weight[None] * s_mod
-        dw_style = weight[None] * ds_mod
-        
-        # Demodulation (normalize over spatial + input channels)
-        norm = jnp.sqrt(jnp.sum(w**2, axis=(2,3,4,5), keepdims=True) + eps)
-        dnorm = -jnp.sum(w * dw_style, axis=(2,3,4,5), keepdims=True) / (norm**3)
-        
-        w_normalized = w / norm
-        dw_normalized = (dw_style / norm) + (w * dnorm)
-
-        if dx is None:
-            # First layer handling
-            Dz = (s[:, 1] + 1.0)[:, None, None, None, None, None]
-            dw_normalized = dw_normalized + w_normalized / Dz
-        else:
-            dw_normalized = dw_normalized
-        
-        return w_normalized, dw_normalized
-    
-def modulate_emulator_parameters_vel(params, z, Om, eps = 1.e-8, dtype=jnp.float32):
-    """
-    Preprocess all network parameters for fixed (z, Om).
-    
-    Returns new params dict with modulated weights.
-    """
-    # Compute style vector
-    #s0 = (Om - 0.3) * 5.
-    #s1 = D(jnp.array([z]), jnp.array([Om]))[0] - 1.
-    #s = jnp.array([[s0, s1]])
-
-    Dz = D(z, Om)
-    
-    # Compute style vector
-    s0 = (Om - 0.3) * 5.
-    s1 = Dz - 1.
-    s = jnp.stack([s0, s1], axis=-1)
-    
-    # Process each block
-    processed_params = {'params':{}}
-    # Process each block
-    for block_name, block_params in params['params'].items():
-        processed_params['params'][block_name] = {}
-        for layer_name, layer_params in block_params.items():
-            if 'style_weight' in layer_params:
-                # Only the first block's conv_0 and skip layers have input that is linear in Dz
-                if block_name == 'conv_l00' and (layer_name == 'conv_0' or layer_name == 'skip') :
-                    dx = None
-                else :
-                    dx = 1
-                # This layer has style modulation - preprocess it
-                w_norm, dw_norm = _modulate_weights_vel(
-                    layer_params['style_weight'],
-                    layer_params['style_bias'],
-                    layer_params['weight'],
-                    s,
-                    dx=dx,
-                    eps=eps
-                )
-                processed_params['params'][block_name][layer_name] = {
-                    'weight': w_norm[0].astype(dtype),
-                    'dweight': dw_norm[0].astype(dtype),
-                    'bias': layer_params['bias'].astype(dtype)
-                }
-            else:
-                # Pass through unmodified
-                print(f'skipping {block_name} {layer_name}')
-                processed_params['params'][block_name][layer_name] = layer_params
-
-    return processed_params
-
-class NBodyEmulatorVel(nn.Module):
+class NBodyEmulatorVelCore(nn.Module):
     """
     3D U-Net-like neural network for N-body simulations.
     
@@ -124,7 +38,6 @@ class NBodyEmulatorVel(nn.Module):
     out_chan: int = 3
     mid_chan: int = 64
     eps: float = 1e-8
-    dtype: jnp.dtype = jnp.float32
     
     def setup(self):
         """Initialize all network layers."""
@@ -133,62 +46,62 @@ class NBodyEmulatorVel(nn.Module):
         
         # Encoder Path (Downsampling)
         self.conv_l00 = ResNetBlock3DVel(
-            'CACA', self.in_chan, mid_chan_1, eps=self.eps, dtype=self.dtype
+            'CACA', self.in_chan, mid_chan_1, eps=self.eps
         )
         self.conv_l01 = ResNetBlock3DVel(
-            'CACA', mid_chan_1, mid_chan_1, eps=self.eps, dtype=self.dtype
+            'CACA', mid_chan_1, mid_chan_1, eps=self.eps
         )
         self.down_l0 = ResampleBlock3DVel(
-            'DA', mid_chan_1, mid_chan_1, eps=self.eps, dtype=self.dtype
+            'DA', mid_chan_1, mid_chan_1, eps=self.eps
         )
         
         self.conv_l1 = ResNetBlock3DVel(
-            'CACA', mid_chan_1, mid_chan_1, eps=self.eps, dtype=self.dtype
+            'CACA', mid_chan_1, mid_chan_1, eps=self.eps
         )
         self.down_l1 = ResampleBlock3DVel(
-            'DA', mid_chan_1, mid_chan_1, eps=self.eps, dtype=self.dtype
+            'DA', mid_chan_1, mid_chan_1, eps=self.eps
         )
         
         self.conv_l2 = ResNetBlock3DVel(
-            'CACA', mid_chan_1, mid_chan_1, eps=self.eps, dtype=self.dtype
+            'CACA', mid_chan_1, mid_chan_1, eps=self.eps
         )
         self.down_l2 = ResampleBlock3DVel(
-            'DA', mid_chan_1, mid_chan_1, eps=self.eps, dtype=self.dtype
+            'DA', mid_chan_1, mid_chan_1, eps=self.eps
         )
         
         # Bottleneck
         self.conv_c = ResNetBlock3DVel(
-            'CACA', mid_chan_1, mid_chan_1, eps=self.eps, dtype=self.dtype
+            'CACA', mid_chan_1, mid_chan_1, eps=self.eps
         )
         
         # Decoder Path (Upsampling)
         self.up_r2 = ResampleBlock3DVel(
-            'UA', mid_chan_1, mid_chan_1, eps=self.eps, dtype=self.dtype
+            'UA', mid_chan_1, mid_chan_1, eps=self.eps
         )
         self.conv_r2 = ResNetBlock3DVel(
-            'CACA', mid_chan_2, mid_chan_1, eps=self.eps, dtype=self.dtype
+            'CACA', mid_chan_2, mid_chan_1, eps=self.eps
         )
         
         self.up_r1 = ResampleBlock3DVel(
-            'UA', mid_chan_1, mid_chan_1, eps=self.eps, dtype=self.dtype
+            'UA', mid_chan_1, mid_chan_1, eps=self.eps
         )
         self.conv_r1 = ResNetBlock3DVel(
-            'CACA', mid_chan_2, mid_chan_1, eps=self.eps, dtype=self.dtype
+            'CACA', mid_chan_2, mid_chan_1, eps=self.eps
         )
         
         self.up_r0 = ResampleBlock3DVel(
-            'UA', mid_chan_1, mid_chan_1, eps=self.eps, dtype=self.dtype
+            'UA', mid_chan_1, mid_chan_1, eps=self.eps
         )
         self.conv_r00 = ResNetBlock3DVel(
-            'CACA', mid_chan_2, mid_chan_1, eps=self.eps, dtype=self.dtype
+            'CACA', mid_chan_2, mid_chan_1, eps=self.eps
         )
         self.conv_r01 = ResNetBlock3DVel(
-            'CAC', mid_chan_1, self.out_chan, eps=self.eps, dtype=self.dtype
+            'CAC', mid_chan_1, self.out_chan, eps=self.eps
         )
     
     def __call__(self, x, Dz, vel_fac):
         """
-        Forward pass of the NBodyEmulator.
+        Forward pass of the NBodyEmulatorVelCore.
         
         Args:
             x: Input 3D data tensor of shape (B, C_in, D, H, W)
@@ -201,12 +114,12 @@ class NBodyEmulatorVel(nn.Module):
                 - velocity: Predicted velocity field (B, C_out, D', H', W')
         """
         
-        Dz = Dz.astype(self.dtype)[:, None, None, None, None]
-        vel_fac = vel_fac.astype(self.dtype)[:, None, None, None, None]
-        
         # Apply growth factor scaling to input
         # Factor of 6 is from original model input normalization
-        x = x * (Dz / 6.)
+        
+        Dz = jnp.atleast_1d(Dz)[:, None, None, None, None]
+        in_norm = (Dz / 6.).astype(x.dtype)
+        x = x * in_norm
         dx = None  # Will be computed by first layer
         
         # Store cropped input for final residual connection
@@ -262,6 +175,9 @@ class NBodyEmulatorVel(nn.Module):
         displacement = (x + x0) * 6.
         
         # Velocity field (includes derivative w.r.t. Dz)
-        velocity = (dx + x0 / Dz) * vel_fac * 6.
-        
+        vel_fac = jnp.atleast_1d(vel_fac)[:, None, None, None, None]
+        dx_norm = (vel_fac * 6.).astype(x.dtype)
+        x0_norm = (vel_fac * 6. / Dz).astype(x.dtype)
+        velocity = dx * dx_norm  + x0 * x0_norm
+
         return displacement, velocity

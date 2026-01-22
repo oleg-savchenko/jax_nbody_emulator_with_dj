@@ -189,27 +189,6 @@ class TestStyleResampleBlock3D:
         
         assert not jnp.allclose(output1, output2)
     
-    def test_dtype_parameter(self):
-        """Test that dtype parameter is respected"""
-        key = random.PRNGKey(42)
-        
-        block_fp16 = StyleResampleBlock3D(
-            seq='UA',
-            style_size=2,
-            in_chan=16,
-            out_chan=32,
-            dtype=jnp.float16
-        )
-        
-        x = random.normal(key, (1, 16, 4, 8, 8)).astype(jnp.float16)
-        s = jnp.array([[0.3, 1.0]], dtype=jnp.float16)
-        
-        params = block_fp16.init(key, x, s)
-        
-        # Check that parameters are in correct dtype
-        first_param = jax.tree_util.tree_leaves(params)[0]
-        assert first_param.dtype == jnp.float16
-    
     def test_custom_style_size(self):
         """Test block with custom style size"""
         key = random.PRNGKey(42)
@@ -430,26 +409,6 @@ class TestStyleResNetBlock3D:
         output2 = block.apply(params, x, s2)
         
         assert not jnp.allclose(output1, output2)
-    
-    def test_dtype_parameter(self):
-        """Test that dtype parameter is respected"""
-        key = random.PRNGKey(42)
-        
-        block_fp16 = StyleResNetBlock3D(
-            seq='CAC',
-            style_size=2,
-            in_chan=16,
-            out_chan=32,
-            dtype=jnp.float16
-        )
-        
-        x = random.normal(key, (1, 16, 8, 8, 8)).astype(jnp.float16)
-        s = jnp.array([[0.3, 1.0]], dtype=jnp.float16)
-        
-        params = block_fp16.init(key, x, s)
-        
-        first_param = jax.tree_util.tree_leaves(params)[0]
-        assert first_param.dtype == jnp.float16
     
     def test_batched_input(self):
         """Test block with batched input"""

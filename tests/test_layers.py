@@ -83,23 +83,7 @@ class TestConvBase3D:
         # With kernel=2, stride=2: out = (in - kernel) // stride + 1 = (8-2)//2 + 1 = 4
         expected_shape = (1, 32, 4, 8, 8)
         assert output.shape == expected_shape
-    
-    def test_dtype_parameter(self):
-        """Test that dtype parameter works correctly"""
-        key = random.PRNGKey(42)
-        
-        layer_fp32 = ConvBase3D(in_chan=16, out_chan=32, dtype=jnp.float32)
-        layer_fp16 = ConvBase3D(in_chan=16, out_chan=32, dtype=jnp.float16)
-        
-        x_fp32 = random.normal(key, (1, 16, 8, 8, 8))
-        
-        params_fp32 = layer_fp32.init(key, x_fp32)
-        params_fp16 = layer_fp16.init(key, x_fp32.astype(jnp.float16))
-        
-        # Check parameter dtypes
-        assert params_fp32['params']['weight'].dtype == jnp.float32
-        assert params_fp16['params']['weight'].dtype == jnp.float16
-
+ 
 
 class TestConvTransposeBase3D:
     """Test the ConvTransposeBase3D class for upsampling"""
@@ -151,22 +135,6 @@ class TestConvTransposeBase3D:
             # Should double each dimension
             expected_shape = (1, 32, 2*d, 2*h, 2*w)
             assert output.shape == expected_shape
-    
-    def test_dtype_parameter(self):
-        """Test that dtype parameter works correctly"""
-        key = random.PRNGKey(42)
-        
-        layer_fp32 = ConvTransposeBase3D(in_chan=16, out_chan=32, dtype=jnp.float32)
-        layer_fp16 = ConvTransposeBase3D(in_chan=16, out_chan=32, dtype=jnp.float16)
-        
-        x_fp32 = random.normal(key, (1, 16, 4, 4, 4))
-        
-        params_fp32 = layer_fp32.init(key, x_fp32)
-        params_fp16 = layer_fp16.init(key, x_fp32.astype(jnp.float16))
-        
-        assert params_fp32['params']['weight'].dtype == jnp.float32
-        assert params_fp16['params']['weight'].dtype == jnp.float16
-
 
 class TestLeakyReLU:
     """Test LeakyReLU activation function"""
@@ -215,26 +183,6 @@ class TestLeakyReLU:
         
         assert jnp.allclose(output, x)
     
-    def test_dtype_parameter(self):
-        """Test that dtype parameter works correctly"""
-        key = random.PRNGKey(42)
-        
-        layer_fp32 = LeakyReLU(dtype=jnp.float32)
-        layer_fp16 = LeakyReLU(dtype=jnp.float16)
-        
-        x_fp32 = jnp.array([[-1.0, 0.0, 1.0]])
-        x_fp16 = x_fp32.astype(jnp.float16)
-        
-        params_fp32 = layer_fp32.init(key, x_fp32)
-        params_fp16 = layer_fp16.init(key, x_fp16)
-        
-        output_fp32 = layer_fp32.apply(params_fp32, x_fp32)
-        output_fp16 = layer_fp16.apply(params_fp16, x_fp16)
-        
-        assert output_fp32.dtype == jnp.float32
-        assert output_fp16.dtype == jnp.float16
-
-
 class TestConv3D:
     """Test Conv3D layer (partial of ConvBase3D)"""
     

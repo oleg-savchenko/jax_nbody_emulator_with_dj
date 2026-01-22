@@ -1,5 +1,5 @@
 """
-Tests for style_nbody_emulator.py module.
+Tests for style_nbody_emulator_core.py module.
 
 Main N-body emulator model implementation with style conditioning.
 
@@ -13,26 +13,25 @@ import jax
 import jax.numpy as jnp
 import jax.random as random
 
-from jax_nbody_emulator.style_nbody_emulator import StyleNBodyEmulator
+from jax_nbody_emulator.style_nbody_emulator_core import StyleNBodyEmulatorCore
 
 
-class TestStyleNBodyEmulatorInitialization:
-    """Test StyleNBodyEmulator initialization"""
+class TestStyleNBodyEmulatorCoreInitialization:
+    """Test StyleNBodyEmulatorCore initialization"""
     
     def test_default_initialization(self):
         """Test that model initializes with default parameters"""
-        model = StyleNBodyEmulator()
+        model = StyleNBodyEmulatorCore()
         
         assert model.style_size == 2
         assert model.in_chan == 3
         assert model.out_chan == 3
         assert model.mid_chan == 64
         assert model.eps == 1e-8
-        assert model.dtype == jnp.float32
     
     def test_custom_channels(self):
         """Test model with custom channel configuration"""
-        model = StyleNBodyEmulator(
+        model = StyleNBodyEmulatorCore(
             in_chan=1,
             out_chan=1,
             mid_chan=32
@@ -44,24 +43,18 @@ class TestStyleNBodyEmulatorInitialization:
     
     def test_custom_style_size(self):
         """Test model with custom style size"""
-        model = StyleNBodyEmulator(style_size=4)
+        model = StyleNBodyEmulatorCore(style_size=4)
         
         assert model.style_size == 4
-    
-    def test_custom_dtype(self):
-        """Test model with custom dtype"""
-        model = StyleNBodyEmulator(dtype=jnp.float16)
-        
-        assert model.dtype == jnp.float16
 
 
-class TestStyleNBodyEmulatorForwardPass:
-    """Test StyleNBodyEmulator forward pass"""
+class TestStyleNBodyEmulatorCoreForwardPass:
+    """Test StyleNBodyEmulatorCore forward pass"""
     
     def test_forward_pass_shape(self):
         """Test that forward pass produces correct output shape"""
         key = random.PRNGKey(42)
-        model = StyleNBodyEmulator()
+        model = StyleNBodyEmulatorCore()
         
         # Input spatial size must be at least 128 to have valid output after cropping
         # The model crops 48 voxels per side: output = input - 96
@@ -81,7 +74,7 @@ class TestStyleNBodyEmulatorForwardPass:
     def test_larger_input(self):
         """Test with larger input spatial size"""
         key = random.PRNGKey(42)
-        model = StyleNBodyEmulator()
+        model = StyleNBodyEmulatorCore()
         
         batch_size = 1
         spatial_size = 160  # Output will be 160 - 96 = 64
@@ -98,7 +91,7 @@ class TestStyleNBodyEmulatorForwardPass:
     def test_batch_processing(self):
         """Test that model handles batched inputs correctly"""
         key = random.PRNGKey(42)
-        model = StyleNBodyEmulator()
+        model = StyleNBodyEmulatorCore()
         
         batch_size = 2
         spatial_size = 128
@@ -116,7 +109,7 @@ class TestStyleNBodyEmulatorForwardPass:
     def test_output_finite(self):
         """Test that output values are finite"""
         key = random.PRNGKey(42)
-        model = StyleNBodyEmulator()
+        model = StyleNBodyEmulatorCore()
         
         spatial_size = 128
         x = random.normal(key, (1, 3, spatial_size, spatial_size, spatial_size))
@@ -129,13 +122,13 @@ class TestStyleNBodyEmulatorForwardPass:
         assert jnp.all(jnp.isfinite(output))
 
 
-class TestStyleNBodyEmulatorCosmology:
+class TestStyleNBodyEmulatorCoreCosmology:
     """Test cosmological parameter handling"""
     
     def test_cosmology_affects_output(self):
         """Test that cosmology parameters affect output"""
         key = random.PRNGKey(42)
-        model = StyleNBodyEmulator()
+        model = StyleNBodyEmulatorCore()
         
         spatial_size = 128
         x = random.normal(key, (1, 3, spatial_size, spatial_size, spatial_size))
@@ -152,7 +145,7 @@ class TestStyleNBodyEmulatorCosmology:
     def test_om_scaling(self):
         """Test that Om parameter affects output"""
         key = random.PRNGKey(42)
-        model = StyleNBodyEmulator()
+        model = StyleNBodyEmulatorCore()
         
         spatial_size = 128
         x = random.normal(key, (1, 3, spatial_size, spatial_size, spatial_size))
@@ -168,7 +161,7 @@ class TestStyleNBodyEmulatorCosmology:
     def test_dz_scaling(self):
         """Test that Dz parameter affects output (both style and input scaling)"""
         key = random.PRNGKey(42)
-        model = StyleNBodyEmulator()
+        model = StyleNBodyEmulatorCore()
         
         spatial_size = 128
         x = random.normal(key, (1, 3, spatial_size, spatial_size, spatial_size))
@@ -184,7 +177,7 @@ class TestStyleNBodyEmulatorCosmology:
     def test_style_vector_construction(self):
         """Test that style vector is constructed correctly from Om and Dz"""
         key = random.PRNGKey(42)
-        model = StyleNBodyEmulator()
+        model = StyleNBodyEmulatorCore()
         
         spatial_size = 128
         x = random.normal(key, (1, 3, spatial_size, spatial_size, spatial_size))
@@ -203,13 +196,13 @@ class TestStyleNBodyEmulatorCosmology:
         assert not jnp.allclose(output1, output2)
 
 
-class TestStyleNBodyEmulatorResidualConnection:
+class TestStyleNBodyEmulatorCoreResidualConnection:
     """Test residual connection behavior"""
     
     def test_residual_connection_working(self):
         """Test that residual connection is working"""
         key = random.PRNGKey(42)
-        model = StyleNBodyEmulator()
+        model = StyleNBodyEmulatorCore()
         
         spatial_size = 128
         x = jnp.ones((1, 3, spatial_size, spatial_size, spatial_size)) * 0.5
@@ -227,7 +220,7 @@ class TestStyleNBodyEmulatorResidualConnection:
     def test_input_affects_output(self):
         """Test that changing input changes output"""
         key = random.PRNGKey(42)
-        model = StyleNBodyEmulator()
+        model = StyleNBodyEmulatorCore()
         
         spatial_size = 128
         x1 = random.normal(key, (1, 3, spatial_size, spatial_size, spatial_size))
@@ -243,13 +236,13 @@ class TestStyleNBodyEmulatorResidualConnection:
         assert not jnp.allclose(output1, output2)
 
 
-class TestStyleNBodyEmulatorDtype:
+class TestStyleNBodyEmulatorCoreDtype:
     """Test dtype handling"""
     
     def test_dtype_fp32(self):
         """Test model with FP32 precision (default)"""
         key = random.PRNGKey(42)
-        model = StyleNBodyEmulator(dtype=jnp.float32)
+        model = StyleNBodyEmulatorCore()
         
         spatial_size = 128
         x = random.normal(key, (1, 3, spatial_size, spatial_size, spatial_size))
@@ -264,12 +257,12 @@ class TestStyleNBodyEmulatorDtype:
     def test_dtype_fp16(self):
         """Test model with FP16 precision"""
         key = random.PRNGKey(42)
-        model = StyleNBodyEmulator(dtype=jnp.float16)
+        model = StyleNBodyEmulatorCore()
         
         spatial_size = 128
         x = random.normal(key, (1, 3, spatial_size, spatial_size, spatial_size)).astype(jnp.float16)
-        Om = jnp.array([0.3], dtype=jnp.float16)
-        Dz = jnp.array([1.0], dtype=jnp.float16)
+        Om = jnp.array([0.3])
+        Dz = jnp.array([1.0])
         
         params = model.init(key, x, Om, Dz)
         output = model.apply(params, x, Om, Dz)
@@ -280,12 +273,12 @@ class TestStyleNBodyEmulatorDtype:
     def test_dtype_bfloat16(self):
         """Test model with BF16 precision"""
         key = random.PRNGKey(42)
-        model = StyleNBodyEmulator(dtype=jnp.bfloat16)
+        model = StyleNBodyEmulatorCore()
         
         spatial_size = 128
         x = random.normal(key, (1, 3, spatial_size, spatial_size, spatial_size)).astype(jnp.bfloat16)
-        Om = jnp.array([0.3], dtype=jnp.bfloat16)
-        Dz = jnp.array([1.0], dtype=jnp.bfloat16)
+        Om = jnp.array([0.3])
+        Dz = jnp.array([1.0])
         
         params = model.init(key, x, Om, Dz)
         output = model.apply(params, x, Om, Dz)
@@ -293,13 +286,13 @@ class TestStyleNBodyEmulatorDtype:
         assert output.dtype == jnp.bfloat16
 
 
-class TestStyleNBodyEmulatorJAXCompatibility:
+class TestStyleNBodyEmulatorCoreJAXCompatibility:
     """Test JAX-specific functionality"""
     
     def test_jit_compilation(self):
         """Test that model can be JIT compiled"""
         key = random.PRNGKey(42)
-        model = StyleNBodyEmulator()
+        model = StyleNBodyEmulatorCore()
         
         spatial_size = 128
         x = random.normal(key, (1, 3, spatial_size, spatial_size, spatial_size))
@@ -319,7 +312,7 @@ class TestStyleNBodyEmulatorJAXCompatibility:
     def test_gradient_computation(self):
         """Test that gradients can be computed"""
         key = random.PRNGKey(42)
-        model = StyleNBodyEmulator()
+        model = StyleNBodyEmulatorCore()
         
         spatial_size = 128
         x = random.normal(key, (1, 3, spatial_size, spatial_size, spatial_size))
@@ -339,13 +332,13 @@ class TestStyleNBodyEmulatorJAXCompatibility:
         assert all(jnp.all(jnp.isfinite(g)) for g in grad_leaves)
 
 
-class TestStyleNBodyEmulatorParameterStructure:
+class TestStyleNBodyEmulatorCoreParameterStructure:
     """Test parameter structure"""
     
     def test_parameter_structure(self):
         """Test that parameters have expected structure"""
         key = random.PRNGKey(42)
-        model = StyleNBodyEmulator()
+        model = StyleNBodyEmulatorCore()
         
         spatial_size = 128
         x = random.normal(key, (1, 3, spatial_size, spatial_size, spatial_size))
@@ -374,7 +367,7 @@ class TestStyleNBodyEmulatorParameterStructure:
     def test_parameter_count(self):
         """Test that parameter count is reasonable"""
         key = random.PRNGKey(42)
-        model = StyleNBodyEmulator()
+        model = StyleNBodyEmulatorCore()
         
         spatial_size = 128
         x = random.normal(key, (1, 3, spatial_size, spatial_size, spatial_size))
@@ -392,7 +385,7 @@ class TestStyleNBodyEmulatorParameterStructure:
     def test_all_parameters_finite(self):
         """Test that all initialized parameters are finite"""
         key = random.PRNGKey(42)
-        model = StyleNBodyEmulator()
+        model = StyleNBodyEmulatorCore()
         
         spatial_size = 128
         x = random.normal(key, (1, 3, spatial_size, spatial_size, spatial_size))
@@ -405,13 +398,13 @@ class TestStyleNBodyEmulatorParameterStructure:
             assert jnp.all(jnp.isfinite(leaf))
 
 
-class TestStyleNBodyEmulatorEdgeCases:
+class TestStyleNBodyEmulatorCoreEdgeCases:
     """Test edge cases and numerical stability"""
     
     def test_zero_input(self):
         """Test model behavior with zero input"""
         key = random.PRNGKey(42)
-        model = StyleNBodyEmulator()
+        model = StyleNBodyEmulatorCore()
         
         spatial_size = 128
         x = jnp.zeros((1, 3, spatial_size, spatial_size, spatial_size))
@@ -429,7 +422,7 @@ class TestStyleNBodyEmulatorEdgeCases:
     def test_extreme_cosmology_low(self):
         """Test with low cosmology values"""
         key = random.PRNGKey(42)
-        model = StyleNBodyEmulator()
+        model = StyleNBodyEmulatorCore()
         
         spatial_size = 128
         x = random.normal(key, (1, 3, spatial_size, spatial_size, spatial_size))
@@ -446,7 +439,7 @@ class TestStyleNBodyEmulatorEdgeCases:
     def test_extreme_cosmology_high(self):
         """Test with high cosmology values"""
         key = random.PRNGKey(42)
-        model = StyleNBodyEmulator()
+        model = StyleNBodyEmulatorCore()
         
         spatial_size = 128
         x = random.normal(key, (1, 3, spatial_size, spatial_size, spatial_size))
@@ -463,12 +456,12 @@ class TestStyleNBodyEmulatorEdgeCases:
     def test_numerical_stability_fp16(self):
         """Test numerical stability with FP16"""
         key = random.PRNGKey(42)
-        model = StyleNBodyEmulator(dtype=jnp.float16)
+        model = StyleNBodyEmulatorCore()
         
         spatial_size = 128
         x = random.normal(key, (1, 3, spatial_size, spatial_size, spatial_size)).astype(jnp.float16)
-        Om = jnp.array([0.3], dtype=jnp.float16)
-        Dz = jnp.array([1.0], dtype=jnp.float16)
+        Om = jnp.array([0.3])
+        Dz = jnp.array([1.0])
         
         params = model.init(key, x, Om, Dz)
         output = model.apply(params, x, Om, Dz)
@@ -480,7 +473,7 @@ class TestStyleNBodyEmulatorEdgeCases:
     def test_small_input_values(self):
         """Test with very small input values"""
         key = random.PRNGKey(42)
-        model = StyleNBodyEmulator()
+        model = StyleNBodyEmulatorCore()
         
         spatial_size = 128
         x = random.normal(key, (1, 3, spatial_size, spatial_size, spatial_size)) * 1e-6
@@ -495,7 +488,7 @@ class TestStyleNBodyEmulatorEdgeCases:
     def test_large_input_values(self):
         """Test with large input values"""
         key = random.PRNGKey(42)
-        model = StyleNBodyEmulator()
+        model = StyleNBodyEmulatorCore()
         
         spatial_size = 128
         x = random.normal(key, (1, 3, spatial_size, spatial_size, spatial_size)) * 1e3
@@ -508,13 +501,13 @@ class TestStyleNBodyEmulatorEdgeCases:
         assert jnp.all(jnp.isfinite(output))
 
 
-class TestStyleNBodyEmulatorArchitecture:
+class TestStyleNBodyEmulatorCoreArchitecture:
     """Test architectural properties"""
     
     def test_encoder_decoder_symmetry(self):
         """Test that encoder and decoder have symmetric structure"""
         key = random.PRNGKey(42)
-        model = StyleNBodyEmulator()
+        model = StyleNBodyEmulatorCore()
         
         spatial_size = 128
         x = random.normal(key, (1, 3, spatial_size, spatial_size, spatial_size))
@@ -536,7 +529,7 @@ class TestStyleNBodyEmulatorArchitecture:
     def test_bottleneck_exists(self):
         """Test that bottleneck layer exists"""
         key = random.PRNGKey(42)
-        model = StyleNBodyEmulator()
+        model = StyleNBodyEmulatorCore()
         
         spatial_size = 128
         x = random.normal(key, (1, 3, spatial_size, spatial_size, spatial_size))
@@ -552,7 +545,7 @@ class TestStyleNBodyEmulatorArchitecture:
         key = random.PRNGKey(42)
         
         for mid_chan in [32, 64, 128]:
-            model = StyleNBodyEmulator(mid_chan=mid_chan)
+            model = StyleNBodyEmulatorCore(mid_chan=mid_chan)
             
             spatial_size = 128
             x = random.normal(key, (1, 3, spatial_size, spatial_size, spatial_size))
