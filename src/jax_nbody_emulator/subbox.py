@@ -16,7 +16,7 @@ import jax
 import jax.numpy as jnp
 from tqdm import tqdm
 
-from .cosmology import D, vel_norm
+from .cosmology import growth_factor, vel_norm
 from .nbody_emulator_core import NBodyEmulatorCore
 from .nbody_emulator_vel_core import NBodyEmulatorVelCore
 from .style_nbody_emulator_core import StyleNBodyEmulatorCore
@@ -153,7 +153,7 @@ class SubboxProcessor:
             vel_out = np.zeros((self.config.in_chan,) + self.config.size, dtype=np.float32)
         
         # Compute cosmology once in FP32 (for accuracy)
-        Dz = jnp.atleast_1d(D(z, Om))
+        Dz = jnp.atleast_1d(growth_factor(z, Om))
         
         # Prepare additional inputs based on mode
         vel_fac = None

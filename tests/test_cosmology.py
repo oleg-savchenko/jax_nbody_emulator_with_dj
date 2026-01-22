@@ -8,7 +8,7 @@ import pytest
 import jax
 import jax.numpy as jnp
 from jax_nbody_emulator.cosmology import (
-    D, H, f, vel_norm, acc_norm, dlogH_dloga, _growth_2f1
+    growth_factor, hubble_rate, growth_rate, vel_norm, acc_norm, dlogH_dloga, _growth_2f1
 )
 
 
@@ -18,15 +18,15 @@ class TestBasicCosmology:
     def test_growth_factor_at_z_zero(self):
         """Growth factor should be 1 at z=0"""
         z = jnp.array([0.0])
-        assert jnp.isclose(D(z, jnp.array([0.3])), 1.0, rtol=1e-6)
-        assert jnp.isclose(D(z, jnp.array([0.1])), 1.0, rtol=1e-6)
-        assert jnp.isclose(D(z, jnp.array([0.5])), 1.0, rtol=1e-6)
+        assert jnp.isclose(growth_factor(z, jnp.array([0.3])), 1.0, rtol=1e-6)
+        assert jnp.isclose(growth_factor(z, jnp.array([0.1])), 1.0, rtol=1e-6)
+        assert jnp.isclose(growth_factor(z, jnp.array([0.5])), 1.0, rtol=1e-6)
     
     def test_growth_factor_decreases_with_redshift(self):
         """Growth factor should decrease with increasing redshift"""
         Om = jnp.array([0.3, 0.3, 0.3, 0.3, 0.3])
         z_values = jnp.array([0.0, 0.5, 1.0, 2.0, 3.0])
-        D_values = D(z_values, Om)
+        D_values = growth_factor(z_values, Om)
         
         # Should be monotonically decreasing
         assert jnp.all(jnp.diff(D_values) < 0)
@@ -34,14 +34,14 @@ class TestBasicCosmology:
     def test_hubble_parameter_at_z_zero(self):
         """Hubble parameter should equal 100 at z=0 (in units of h km/s/Mpc)"""
         z = jnp.array([0.0])
-        assert jnp.isclose(H(z, jnp.array([0.3])), 100.0, rtol=1e-6)
-        assert jnp.isclose(H(z, jnp.array([0.1])), 100.0, rtol=1e-6)
+        assert jnp.isclose(hubble_rate(z, jnp.array([0.3])), 100.0, rtol=1e-6)
+        assert jnp.isclose(hubble_rate(z, jnp.array([0.1])), 100.0, rtol=1e-6)
     
     def test_hubble_parameter_increases_with_redshift(self):
         """Hubble parameter should increase with redshift"""
         Om = jnp.array([0.3, 0.3, 0.3, 0.3, 0.3])
         z_values = jnp.array([0.0, 0.5, 1.0, 2.0, 3.0])
-        H_values = H(z_values, Om)
+        H_values = hubble_rate(z_values, Om)
         
         # Should be monotonically increasing
         assert jnp.all(jnp.diff(H_values) > 0)
@@ -50,7 +50,7 @@ class TestBasicCosmology:
         """Growth rate f should be positive"""
         Om = jnp.array([0.3, 0.3, 0.3, 0.3])
         z_values = jnp.array([0.0, 0.5, 1.0, 2.0])
-        f_values = f(z_values, Om)
+        f_values = growth_rate(z_values, Om)
         
         assert jnp.all(f_values > 0)
         assert jnp.all(f_values < 2.0)  # Reasonable upper bound
@@ -65,13 +65,13 @@ class TestCosmologyArrays:
         Om_array = jnp.array([0.3, 0.3, 0.3, 0.3])
         
         # Test with array inputs
-        D_values = D(z_array, Om_array)
+        D_values = growth_factor(z_array, Om_array)
         assert D_values.shape == z_array.shape
         
-        H_values = H(z_array, Om_array)
+        H_values = hubble_rate(z_array, Om_array)
         assert H_values.shape == z_array.shape
         
-        f_values = f(z_array, Om_array)
+        f_values = growth_rate(z_array, Om_array)
         assert f_values.shape == z_array.shape
     
     def test_different_omega_m_values(self):
@@ -79,7 +79,7 @@ class TestCosmologyArrays:
         z_array = jnp.array([1.0, 1.0, 1.0, 1.0])
         Om_array = jnp.array([0.2, 0.3, 0.4, 0.5])
         
-        D_values = D(z_array, Om_array)
+        D_values = growth_factor(z_array, Om_array)
         assert D_values.shape == Om_array.shape
         
         # Higher omega_m should give lower growth at fixed z
@@ -99,11 +99,11 @@ class TestCosmologyDerivatives:
         z_plus = jnp.array([z[0] + dz])
         z_minus = jnp.array([z[0] - dz])
         
-        dlogD_dz_fd = (jnp.log(D(z_plus, Om)) - jnp.log(D(z_minus, Om))) / (2 * dz)
+        dlogD_dz_fd = (jnp.log(growth_factor(z_plus, Om)) - jnp.log(growth_factor(z_minus, Om))) / (2 * dz)
         f_fd = -dlogD_dz_fd[0] * (1 + z[0])
         
         # Automatic differentiation result
-        f_ad = f(z, Om)[0]
+        f_ad = growth_rate(z, Om)[0]
         
         assert jnp.isclose(f_ad, f_fd, rtol=1e-3)
     
@@ -128,9 +128,9 @@ class TestCosmologyPhysics:
         Om = jnp.array([0.99999])  # Close to 1
         z = jnp.array([1.0])
         
-        # In EdS: D(z) = 1/(1+z), f = 1
-        D_eds = D(z, Om)[0]
-        f_eds = f(z, Om)[0]
+        # In EdS: growth_factor(z) = 1/(1+z), f = 1
+        D_eds = growth_factor(z, Om)[0]
+        f_eds = growth_rate(z, Om)[0]
         
         expected_D = 1.0 / (1 + z[0])
         expected_f = 1.0
@@ -158,10 +158,10 @@ class TestCosmologyPhysics:
         z = jnp.array([1.0, 1.0, 1.0, 1.0, 1.0])
         Om_values = jnp.array([0.1, 0.3, 0.5, 0.7, 0.9])
         
-        D_values = D(z, Om_values)
-        f_values = f(z, Om_values)
+        D_values = growth_factor(z, Om_values)
+        f_values = growth_rate(z, Om_values)
         
-        # Higher omega_m should give lower growth at fixed z if D(z=0)=1
+        # Higher omega_m should give lower growth at fixed z if growth_factor(z=0)=1
         assert jnp.all(jnp.diff(D_values) < 0)
         # Growth rate should increase with omega_m
         assert jnp.all(jnp.diff(f_values) > 0)
@@ -175,8 +175,8 @@ class TestCosmologyEdgeCases:
         Om = jnp.array([0.3, 0.3, 0.3])
         z_high = jnp.array([5.0, 10.0, 20.0])
         
-        D_high = D(z_high, Om)
-        f_high = f(z_high, Om)
+        D_high = growth_factor(z_high, Om)
+        f_high = growth_rate(z_high, Om)
         
         # Should be finite
         assert jnp.all(jnp.isfinite(D_high))
@@ -199,8 +199,8 @@ class TestCosmologyEdgeCases:
         z = jnp.array([1.0])
         
         # Should still be finite
-        D_small = D(z, Om)[0]
-        f_small = f(z, Om)[0]
+        D_small = growth_factor(z, Om)[0]
+        f_small = growth_rate(z, Om)[0]
         
         assert jnp.isfinite(D_small)
         assert jnp.isfinite(f_small)
@@ -210,7 +210,7 @@ class TestCosmologyEdgeCases:
         Om = jnp.array([0.3])
         z = jnp.array([0.0])
         
-        D_zero = D(z, Om)[0]
+        D_zero = growth_factor(z, Om)[0]
         assert jnp.isclose(D_zero, 1.0, rtol=1e-6)
 
 
@@ -223,9 +223,9 @@ class TestJAXCompatibility:
         z = jnp.array([1.0])
         Om = jnp.array([0.3])
         
-        D_val = D(z, Om)[0]
-        H_val = H(z, Om)[0]
-        f_val = f(z, Om)[0]
+        D_val = growth_factor(z, Om)[0]
+        H_val = hubble_rate(z, Om)[0]
+        f_val = growth_rate(z, Om)[0]
         
         assert jnp.isfinite(D_val)
         assert jnp.isfinite(H_val)
@@ -239,7 +239,7 @@ class TestJAXCompatibility:
         # Use forward-mode (JVP) instead of reverse-mode (grad)
         primals = (jnp.array([z_val]),)
         tangents = (jnp.array([1.0]),)
-        _, grad = jax.jvp(lambda z: D(z, Om)[0]**2, primals, tangents)
+        _, grad = jax.jvp(lambda z: growth_factor(z, Om)[0]**2, primals, tangents)
         
         # Gradient should be finite
         assert jnp.isfinite(grad)
@@ -250,7 +250,7 @@ class TestJAXCompatibility:
         z_batch = jnp.linspace(0.0, 2.0, batch_size)
         Om_batch = jnp.full(batch_size, 0.3)
         
-        D_batch = D(z_batch, Om_batch)
+        D_batch = growth_factor(z_batch, Om_batch)
         vel_batch = vel_norm(z_batch, Om_batch)
         
         assert D_batch.shape == (batch_size,)

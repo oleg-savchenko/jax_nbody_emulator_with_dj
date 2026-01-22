@@ -1,19 +1,21 @@
 """
 N-Body Emulator: A JAX-based neural network emulator for cosmological simulations.
 
-This package provides two inference modes:
+Quick start:
+    from jax_nbody_emulator import create_emulator, SubboxConfig
+    
+    config = SubboxConfig(size=(512, 512, 512), ndiv=(4, 4, 4))
+    emulator = create_emulator(processor_config=config)
+    displacement, velocity = emulator.process_box(input_box, z=0.0, Om=0.3)
 
-**Preprocessed Mode (Fast):**
-- Preprocess parameters once per cosmology: `modulate_emulator_parameters()`
-- Run inference many times: `NBodyEmulator`
-- Use: `SubboxProcessor` or `SubboxProcessorVel`
-- Best for: Processing many boxes with same (Om, z)
-
-**Style Mode (Flexible):**
-- Pass (Om, Dz) as inputs to each forward pass
-- Models: `StyleNBodyEmulator` or `StyleNBodyEmulatorVel`
-- Use: `StyleSubboxProcessor` or `StyleSubboxProcessorVel`
-- Best for: Varying cosmology per box
+For fixed cosmology (faster repeated inference):
+    emulator = create_emulator(
+        premodulate=True,
+        premodulate_z=0.0,
+        premodulate_Om=0.3,
+        processor_config=config,
+    )
+    displacement, velocity = emulator.process_box(input_box, z=0.0, Om=0.3)
 
 Copyright (C) 2025 Drew Jamieson
 Licensed under GNU GPL v3.0 - see LICENSE file for details.
@@ -21,105 +23,73 @@ Licensed under GNU GPL v3.0 - see LICENSE file for details.
 Author: Drew Jamieson <drew.s.jamieson@gmail.com>
 """
 
-from importlib import resources
-import numpy as np
-import jax.numpy as jnp
-import jax
+# =============================================================================
+# Tier 1: Primary API (most users only need these)
+# =============================================================================
 
-# Cosmology
-from .cosmology import D, H, f, dlogH_dloga, vel_norm, acc_norm
+from .nbody_emulator import (
+    NBodyEmulator,
+    create_emulator,
+    load_default_parameters,
+    modulate_emulator_parameters,
+    modulate_emulator_parameters_vel,
+)
+from .subbox import SubboxConfig, SubboxProcessor
+from .cosmology import growth_factor, hubble_rate, growth_rate, dlogH_dloga, vel_norm, acc_norm
 
-# Preprocessed models (no style)
-from .layers import ConvBase3D, Conv3D, Skip3D, DownSample3D, UpSample3D, LeakyReLU
-from .blocks import ResampleBlock3D, ResNetBlock3D
+# =============================================================================
+# Tier 2: Core models (for users who want direct model access)
+# =============================================================================
+
+from .style_nbody_emulator_core import StyleNBodyEmulatorCore
+from .style_nbody_emulator_vel_core import StyleNBodyEmulatorVelCore
 from .nbody_emulator_core import NBodyEmulatorCore
-
-# Preprocessed models with velocity
-from .layers_vel import ConvBase3DVel, Conv3DVel, Skip3DVel, DownSample3DVel, UpSample3DVel, LeakyReLUVel
-from .blocks_vel import ResampleBlock3DVel, ResNetBlock3DVel
 from .nbody_emulator_vel_core import NBodyEmulatorVelCore
 
-# Style models (Om, Dz inputs)
-from .style_layers import StyleConvBase3D, StyleConv3D, StyleSkip3D, StyleDownSample3D, StyleUpSample3D
-from .style_blocks import StyleResampleBlock3D, StyleResNetBlock3D
-from .style_nbody_emulator_core import StyleNBodyEmulatorCore
+# =============================================================================
+# Tier 3: Building blocks (for custom architectures)
+# These are importable but not in __all__ to reduce clutter
+# Usage: from jax_nbody_emulator.layers import Conv3D
+# =============================================================================
 
-# Style models with velocity
-from .style_layers_vel import StyleConvBase3DVel, StyleConv3DVel, StyleSkip3DVel, StyleDownSample3DVel, StyleUpSample3DVel
-from .style_blocks_vel import StyleResampleBlock3DVel, StyleResNetBlock3DVel
-from .style_nbody_emulator_vel_core import StyleNBodyEmulatorVelCore
+# Layers and blocks are accessible via submodule imports:
+#   from jax_nbody_emulator.layers import Conv3D, Skip3D, ...
+#   from jax_nbody_emulator.blocks import ResNetBlock3D, ...
+#   from jax_nbody_emulator.style_layers import StyleConv3D, ...
+#   from jax_nbody_emulator.style_blocks import StyleResNetBlock3D, ...
 
-# Subbox processing
-from .subbox import SubboxConfig, SubboxProcessor
-
-# Factory for creating emulator objects with subbox processors, and loading/premodulating model parameters
-from .nbody_emulator import NBodyEmulator, load_default_parameters, modulate_emulator_parameters, modulate_emulator_parameters_vel, create_emulator
+# =============================================================================
+# Package metadata
+# =============================================================================
 
 __version__ = "0.1.0"
 __author__ = "Drew Jamieson"
 __email__ = "drew.s.jamieson@gmail.com"
 
+# =============================================================================
+# Public API
+# =============================================================================
+
 __all__ = [
-    # Cosmology functions
-    "D",
-    "H", 
-    "f",
-    "dlogH_dloga",
-    "vel_norm",
-    "acc_norm",
-    # Layers
-    "ConvBase3D",
-    "Conv3D",
-    "Skip3D", 
-    "DownSample3D",
-    "UpSample3D",
-    "LeakyReLU",
-    # Blocks
-    "ResampleBlock3D",
-    "ResNetBlock3D",
-    # Emulator
-    "NBodyEmulatorCore",
-    # Layers with velocity
-    "ConvBase3DVel",
-    "Conv3DVel",
-    "Skip3DVel", 
-    "DownSample3DVel",
-    "UpSample3DVel",
-    "LeakyReLUVel",
-    # Blocks with velocity
-    "ResampleBlock3DVel",
-    "ResNetBlock3DVel",
-    # Emulator with velocity
-    "NBodyEmulatorVelCore",
-    # Style layers
-    "StyleConvBase3D",
-    "StyleConv3D",
-    "StyleSkip3D", 
-    "StyleDownSample3D",
-    "StyleUpSample3D",
-    # Style blocks
-    "StyleResampleBlock3D",
-    "StyleResNetBlock3D",
-    # Style emulator
-    "StyleNBodyEmulatorCore",
-    # Style layers with velocity
-    "StyleConvBase3DVel",
-    "StyleConv3DVel",
-    "StyleSkip3DVel", 
-    "StyleDownSample3DVel",
-    "StyleUpSample3DVel",
-    # Style blocks with velocity
-    "StyleResampleBlock3DVel",
-    "StyleResNetBlock3DVel",
-    # Emulator with velocity
-    "StyleNBodyEmulatorVelCore",
-    # Subbox processors
+    # Primary API - Factory and processing
+    "create_emulator",
+    "NBodyEmulator",
     "SubboxConfig",
     "SubboxProcessor",
-    # Factory
-    "NBodyEmulator",
     "load_default_parameters",
     "modulate_emulator_parameters",
     "modulate_emulator_parameters_vel",
-    "create_emulator"
+    # Cosmology functions
+    "growth_factor",
+    "hubble_rate",
+    "growth_rate",
+    "dlogH_dloga",
+    "vel_norm",
+    "acc_norm",
+    # Core models (Style - flexible cosmology)
+    "StyleNBodyEmulatorCore",
+    "StyleNBodyEmulatorVelCore",
+    # Core models (Premodulated - fixed cosmology)
+    "NBodyEmulatorCore",
+    "NBodyEmulatorVelCore",
 ]

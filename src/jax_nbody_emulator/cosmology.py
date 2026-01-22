@@ -31,7 +31,7 @@ def _growth_2f1(x):
     return jnp.where(x < 0, compute_neg(x), compute_pos(x))
 
 @jax.jit
-def D(z, Om):
+def growth_factor(z, Om):
     """Linear growth function for flat LambdaCDM, normalized to 1 at redshift zero"""
     a = 1 / (1 + z)
     OL = 1 - Om
@@ -40,20 +40,20 @@ def D(z, Om):
     return a * _growth_2f1(aa3) / _growth_2f1(aa30)
 
 @jax.jit
-def H(z, Om):
+def hubble_rate(z, Om):
     """Hubble parameter in [h km/s/Mpc] for flat LambdaCDM"""
     OL = 1 - Om
     return 100 * jnp.sqrt(Om * (1 + z)**3 + OL)
 
 @jax.jit
-def _log_D(z, Om):
+def _log_growth_factor(z, Om):
     """Log of linear growth function"""
-    return jnp.log(D(z, Om))
+    return jnp.log(growth_factor(z, Om))
 
 @jax.jit
-def _log_H(z, Om):
+def _log_hubble_rate(z, Om):
     """Log of Hubble parameter"""
-    return jnp.log(H(z, Om))
+    return jnp.log(hubble_rate(z, Om))
 
 # Use forward-mode differentiation (JVP) instead of reverse-mode (grad)
 def _dlogD_dz(z_scalar, Om_scalar):
@@ -62,7 +62,7 @@ def _dlogD_dz(z_scalar, Om_scalar):
     Om_scalar = jnp.asarray(Om_scalar)
     primals = (z_scalar,)
     tangents = (jnp.ones_like(z_scalar),)
-    _, deriv = jax.jvp(lambda z: _log_D(z, Om_scalar), primals, tangents)
+    _, deriv = jax.jvp(lambda z: _log_growth_factor(z, Om_scalar), primals, tangents)
     return deriv
 
 def _dlogH_dz(z_scalar, Om_scalar):
@@ -71,7 +71,7 @@ def _dlogH_dz(z_scalar, Om_scalar):
     Om_scalar = jnp.asarray(Om_scalar)
     primals = (z_scalar,)
     tangents = (jnp.ones_like(z_scalar),)
-    _, deriv = jax.jvp(lambda z: _log_H(z, Om_scalar), primals, tangents)
+    _, deriv = jax.jvp(lambda z: _log_hubble_rate(z, Om_scalar), primals, tangents)
     return deriv
 
 # Vectorized derivatives
@@ -98,7 +98,7 @@ def dlogH_dz(z, Om):
     return result.reshape(in_shape)
 
 @jax.jit
-def f(z, Om):
+def growth_rate(z, Om):
     """
     Linear growth rate for flat LambdaCDM
     f = d log D / d log a
@@ -138,7 +138,7 @@ def vel_norm(z, Om):
     Returns:
         Normalization factor(s) of shape (B,)
     """
-    return D(z, Om) * f(z, Om) * H(z, Om) / (1 + z)
+    return growth_factor(z, Om) * growth_rate(z, Om) * hubble_rate(z, Om) / (1 + z)
 
 @jax.jit
 def acc_norm(z, Om):
@@ -152,4 +152,4 @@ def acc_norm(z, Om):
     Returns:
         Normalization factor(s) of shape (B,)
     """
-    return D(z, Om) * f(z, Om) * H(z, Om)**2 * dlogH_dloga(z, Om) / (1 + z)
+    return growth_factor(z, Om) * growth_rate(z, Om) * hubble_rate(z, Om)**2 * dlogH_dloga(z, Om) / (1 + z)

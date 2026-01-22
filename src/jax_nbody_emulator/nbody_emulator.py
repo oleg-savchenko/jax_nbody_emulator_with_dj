@@ -16,7 +16,7 @@ from pathlib import Path
 import jax.numpy as jnp
 import flax.linen as nn
 
-from .cosmology import D
+from .cosmology import growth_factor
 from .subbox import SubboxConfig, SubboxProcessor
 
 
@@ -55,11 +55,11 @@ class NBodyEmulator:
         if self.params is None:
             raise ValueError("No parameters loaded. Use load_params=True in create_emulator.")
         
-        from .cosmology import D, vel_norm
+        from .cosmology import growth_factor, vel_norm
 
         z = jnp.atleast_1d(z)
         Om = jnp.atleast_1d(Om)
-        Dz = D(z, Om)
+        Dz = growth_factor(z, Om)
         if self.compute_vel:
             vel_fac = vel_norm(z, Om)
 
@@ -154,7 +154,7 @@ def modulate_emulator_parameters(params, z, Om, eps = 1.e-8):
     Returns new params dict with modulated weights.
     """
     
-    Dz = D(z, Om)
+    Dz = growth_factor(z, Om)
     
     # Compute style vector
     s0 = (Om - 0.3) * 5.
@@ -225,7 +225,7 @@ def modulate_emulator_parameters_vel(params, z, Om, eps = 1.e-8):
     Returns new params dict with modulated weights.
     """
 
-    Dz = D(z, Om)
+    Dz = growth_factor(z, Om)
     
     # Compute style vector
     s0 = (Om - 0.3) * 5.
