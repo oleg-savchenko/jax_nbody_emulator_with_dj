@@ -156,6 +156,7 @@ data/
 outputs/
 checkpoints/
 logs/
+jobs_output/
 
 # Exception: track the model parameters
 !src/jax_nbody_emulator/model_parameters/nbody_emulator_params.npz
