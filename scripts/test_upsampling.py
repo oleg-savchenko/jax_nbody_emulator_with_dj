@@ -7,7 +7,8 @@ This script:
 2. Rescales the input field amplitude from `--input-z` to `--z` using Quijote's growth approximation.
 3. Upsamples it to a target resolution using `resize_density_grid` from `utils.py`.
 4. Compares both against CLASS linear P(k).
-5. Computes cross-correlation C(k) on a common (low-res) grid.
+5. Downsamples the upsampled field back to input resolution with both Gaussian and block-average methods.
+6. Computes cross-correlation C(k) for both downsampling methods on the common input grid.
 
 Example:
 JAX_PLATFORMS=cpu python scripts/test_upsampling.py \
@@ -21,7 +22,7 @@ JAX_PLATFORMS=cpu python scripts/test_upsampling.py \
   --output-dir outputs/upsampling_damping_test
 
 Run on GPU from terminal (Slurm allocation + execution):
-srun -p gpu_a100 --gpus=1 --cpus-per-task=18 --time=00:05:00 \
+srun -p gpu_a100 --gpus=1 --cpus-per-task=18 --time=00:02:00 \
   --export=ALL,JAX_PLATFORMS=cuda \
   python scripts/test_upsampling.py \
   --upsample-method mode_inject --target-res 512
@@ -193,8 +194,10 @@ def make_plot(
     pk_low: np.ndarray,
     k_up: np.ndarray,
     pk_up: np.ndarray,
-    k_cross: np.ndarray,
-    c_cross: np.ndarray,
+    k_cross_gaussian: np.ndarray,
+    c_cross_gaussian: np.ndarray,
+    k_cross_block: np.ndarray,
+    c_cross_block: np.ndarray,
     k_class: np.ndarray,
     pk_class: np.ndarray,
     boxsize: float,
@@ -248,7 +251,18 @@ def make_plot(
     ax.legend(framealpha=0.9)
 
     ax = axes[2]
-    ax.plot(k_cross, c_cross, lw=1.3, label=r"$C(k)$ input vs downsample(upsampled)")
+    ax.plot(
+        k_cross_gaussian,
+        c_cross_gaussian,
+        lw=1.3,
+        label=r"$C(k)$ input vs downsample(upsampled, Gaussian)",
+    )
+    ax.plot(
+        k_cross_block,
+        c_cross_block,
+        lw=1.3,
+        label=r"$C(k)$ input vs downsample(upsampled, Block)",
+    )
     ax.axhline(1.0, color="black", ls="--", lw=0.8)
     ax.axvline(k_nyq_low, color="tab:green", ls="--", lw=0.9, alpha=0.8)
     ax.set_xscale("log")
@@ -268,37 +282,67 @@ def make_slice_comparison_plot(
     *,
     delta_low: np.ndarray,
     delta_up: np.ndarray,
+    delta_up_back_low_gaussian: np.ndarray,
+    delta_up_back_low_block: np.ndarray,
+    gaussian_sigma_mpc_h: float,
     out_path: Path,
-) -> tuple[int, int]:
-    """Plot middle slices of input and upsampled fields side by side."""
+) -> tuple[int, int, int, int]:
+    """Plot middle slices of input, upsampled, and both downsampled-back fields."""
     delta_low = np.asarray(delta_low, dtype=np.float32)
     delta_up = np.asarray(delta_up, dtype=np.float32)
+    delta_up_back_low_gaussian = np.asarray(delta_up_back_low_gaussian, dtype=np.float32)
+    delta_up_back_low_block = np.asarray(delta_up_back_low_block, dtype=np.float32)
 
     slice_low = int(delta_low.shape[0] // 2)
     slice_up = int(delta_up.shape[0] // 2)
+    slice_back_gaussian = int(delta_up_back_low_gaussian.shape[0] // 2)
+    slice_back_block = int(delta_up_back_low_block.shape[0] // 2)
     img_low = delta_low[slice_low, :, :]
     img_up = delta_up[slice_up, :, :]
+    img_back_gaussian = delta_up_back_low_gaussian[slice_back_gaussian, :, :]
+    img_back_block = delta_up_back_low_block[slice_back_block, :, :]
 
-    vals = np.concatenate([img_low.ravel(), img_up.ravel()])
+    vals = np.concatenate(
+        [
+            img_low.ravel(),
+            img_up.ravel(),
+            img_back_gaussian.ravel(),
+            img_back_block.ravel(),
+        ]
+    )
     vmin = float(np.percentile(vals, 1.0))
     vmax = float(np.percentile(vals, 99.0))
 
-    fig, axes = plt.subplots(1, 2, figsize=(8.8, 4.2), constrained_layout=True)
+    fig, axes = plt.subplots(1, 4, figsize=(16.6, 4.2), constrained_layout=True)
     im0 = axes[0].imshow(img_low, origin="lower", cmap="seismic", vmin=vmin, vmax=vmax)
-    axes[0].set_title(f"Input GRF slice x={slice_low}")
+    axes[0].set_title(f"Input GRF\nslice x={slice_low}")
     axes[0].set_xlabel("z")
     axes[0].set_ylabel("y")
 
     im1 = axes[1].imshow(img_up, origin="lower", cmap="seismic", vmin=vmin, vmax=vmax)
-    axes[1].set_title(f"Upsampled GRF slice x={slice_up}")
+    axes[1].set_title(f"Upsampled GRF\nslice x={slice_up}")
     axes[1].set_xlabel("z")
     axes[1].set_ylabel("y")
 
-    fig.colorbar(im1, ax=list(axes), shrink=0.95, label=r"$\delta$")
+    im2 = axes[2].imshow(img_back_gaussian, origin="lower", cmap="seismic", vmin=vmin, vmax=vmax)
+    axes[2].set_title(
+        "Downsampled-back GRF (Gaussian, "
+        f"$\\sigma$={float(gaussian_sigma_mpc_h):.3g} Mpc/h)\n"
+        f"slice x={slice_back_gaussian}"
+    )
+    axes[2].set_xlabel("z")
+    axes[2].set_ylabel("y")
+
+    im3 = axes[3].imshow(img_back_block, origin="lower", cmap="seismic", vmin=vmin, vmax=vmax)
+    axes[3].set_title(f"Downsampled-back GRF (Block)\nslice x={slice_back_block}")
+    axes[3].set_xlabel("z")
+    axes[3].set_ylabel("y")
+
+    fig.colorbar(im3, ax=list(axes), shrink=0.95, label=r"$\delta$")
     out_path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(out_path, dpi=180)
     plt.close(fig)
-    return slice_low, slice_up
+    return slice_low, slice_up, slice_back_gaussian, slice_back_block
 
 
 def main() -> None:
@@ -318,6 +362,8 @@ def main() -> None:
 
     res_low = int(delta_low.shape[0])
     res_up = int(args.target_res)
+    input_voxel_size_mpc_h = float(args.boxsize) / float(res_low)
+    gaussian_sigma_mpc_h = 0.5 * float(input_voxel_size_mpc_h)
 
     t0 = time.perf_counter()
     delta_up = resize_density_grid(
@@ -332,18 +378,35 @@ def main() -> None:
     t_upsample = time.perf_counter() - t0
 
     t0 = time.perf_counter()
-    delta_up_back_low = resize_density_grid(
+    delta_up_back_low_gaussian = resize_density_grid(
         delta_in=delta_up,
         target_res=res_low,
         boxsize=float(args.boxsize),
         upsample_method=str(args.upsample_method),
+        downsample_method="gaussian",
+        downsample_gaussian_sigma_mpc_h=float(gaussian_sigma_mpc_h),
     )
-    t_downsample = time.perf_counter() - t0
+    t_downsample_gaussian = time.perf_counter() - t0
+
+    t0 = time.perf_counter()
+    delta_up_back_low_block = resize_density_grid(
+        delta_in=delta_up,
+        target_res=res_low,
+        boxsize=float(args.boxsize),
+        upsample_method=str(args.upsample_method),
+        downsample_method="block_average",
+    )
+    t_downsample_block = time.perf_counter() - t0
 
     t0 = time.perf_counter()
     k_low, pk_low = compute_pk(delta_low, boxsize=float(args.boxsize))
     k_up, pk_up = compute_pk(delta_up, boxsize=float(args.boxsize))
-    k_cross, c_cross = compute_crosscorr(delta_low, delta_up_back_low, boxsize=float(args.boxsize))
+    k_cross_gaussian, c_cross_gaussian = compute_crosscorr(
+        delta_low, delta_up_back_low_gaussian, boxsize=float(args.boxsize)
+    )
+    k_cross_block, c_cross_block = compute_crosscorr(
+        delta_low, delta_up_back_low_block, boxsize=float(args.boxsize)
+    )
     t_pk = time.perf_counter() - t0
 
     t0 = time.perf_counter()
@@ -368,8 +431,10 @@ def main() -> None:
         pk_low=pk_low,
         k_up=k_up,
         pk_up=pk_up,
-        k_cross=k_cross,
-        c_cross=c_cross,
+        k_cross_gaussian=k_cross_gaussian,
+        c_cross_gaussian=c_cross_gaussian,
+        k_cross_block=k_cross_block,
+        c_cross_block=c_cross_block,
         k_class=np.asarray(k_class, dtype=np.float64),
         pk_class=np.asarray(pk_class, dtype=np.float64),
         boxsize=float(args.boxsize),
@@ -382,9 +447,12 @@ def main() -> None:
 
     t0 = time.perf_counter()
     slice_plot_path = out_dir / "upsampling_slices.png"
-    slice_low, slice_up = make_slice_comparison_plot(
+    slice_low, slice_up, slice_back_gaussian, slice_back_block = make_slice_comparison_plot(
         delta_low=delta_low,
         delta_up=delta_up,
+        delta_up_back_low_gaussian=delta_up_back_low_gaussian,
+        delta_up_back_low_block=delta_up_back_low_block,
+        gaussian_sigma_mpc_h=float(gaussian_sigma_mpc_h),
         out_path=slice_plot_path,
     )
     t_plot_slices = time.perf_counter() - t0
@@ -412,6 +480,9 @@ def main() -> None:
         "growth_D_target": float(d_target),
         "growth_rescale_input_to_target": float(growth_rescale),
         "upsample_method": str(args.upsample_method),
+        "downsample_method": "gaussian_and_block_average",
+        "downsample_gaussian_sigma_mpc_h": float(gaussian_sigma_mpc_h),
+        "input_voxel_size_mpc_h": float(input_voxel_size_mpc_h),
         "plot_kmin_h_per_mpc": float(PLOT_KMIN),
         "k_nyq_input_h_per_mpc": float(k_nyq_low),
         "k_nyq_target_h_per_mpc": float(k_nyq_up),
@@ -419,12 +490,18 @@ def main() -> None:
         "slice_plot_path": str(slice_plot_path),
         "slice_index_input": int(slice_low),
         "slice_index_upsampled": int(slice_up),
-        "crosscorr_definition": "C(k) between input field and downsampled(upsampled field) on input grid",
+        "slice_index_downsampled_gaussian": int(slice_back_gaussian),
+        "slice_index_downsampled_block": int(slice_back_block),
+        "crosscorr_definition": {
+            "gaussian": "C(k) between input field and gaussian-downsampled(upsampled field) on input grid",
+            "block_average": "C(k) between input field and block-downsampled(upsampled field) on input grid",
+        },
         "save_upsampled_field": bool(args.save_upsampled_field),
         "timing_seconds": {
             "load_input": float(t_load),
             "upsample": float(t_upsample),
-            "downsample_back": float(t_downsample),
+            "downsample_back_gaussian": float(t_downsample_gaussian),
+            "downsample_back_block": float(t_downsample_block),
             "power_spectra_and_crosscorr": float(t_pk),
             "class_pk": float(t_class),
             "plot": float(t_plot),
@@ -449,7 +526,11 @@ def main() -> None:
     print("Stage timings:")
     print(f"  - load input: {t_load:.2f} s")
     print(f"  - upsample ({args.upsample_method}): {t_upsample:.2f} s")
-    print(f"  - downsample back: {t_downsample:.2f} s")
+    print(
+        "  - downsample back (gaussian): "
+        f"{t_downsample_gaussian:.2f} s (sigma={gaussian_sigma_mpc_h:.6g} Mpc/h)"
+    )
+    print(f"  - downsample back (block): {t_downsample_block:.2f} s")
     print(f"  - P(k)+C(k): {t_pk:.2f} s")
     print(f"  - CLASS P(k): {t_class:.2f} s")
     print(f"  - plot (total): {t_plot:.2f} s")

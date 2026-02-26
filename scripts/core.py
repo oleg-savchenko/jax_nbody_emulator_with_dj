@@ -21,7 +21,13 @@ from typing import Any
 
 import numpy as np
 
-from utils import add_import_paths, format_hms, get_pk_class, resize_density_grid
+from utils import (
+    add_import_paths,
+    format_hms,
+    get_pk_class,
+    project_field_from_particles,
+    resize_density_grid,
+)
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 add_import_paths(repo_root=REPO_ROOT)
@@ -64,6 +70,7 @@ def _validate_pipeline_args(
     mas_worder: int,
     class_n_modes: int,
     delta_upsample_method: str,
+    downsample_method: str,
 ) -> None:
     """Validate key pipeline argument ranges and enum-like values."""
     if n_part < 1:
@@ -82,6 +89,8 @@ def _validate_pipeline_args(
         raise ValueError("`class_n_modes` must be >= 2.")
     if delta_upsample_method not in {"mode_inject", "fourier", "linear"}:
         raise ValueError("`delta_upsample_method` must be one of: 'mode_inject', 'fourier', 'linear'.")
+    if downsample_method not in {"gaussian", "block_average"}:
+        raise ValueError("`downsample_method` must be one of: 'gaussian', 'block_average'.")
 
 
 def _cosmo_dicts(quijote_fiducial: dict[str, float]) -> tuple[dict[str, float], dict[str, float]]:
@@ -132,6 +141,9 @@ def run_lpt_emulator_pipeline(
     z_target: float = 0.0,
     compute_vel: bool = False,
     delta_upsample_method: str = "mode_inject",
+    downsample_method: str = "gaussian",
+    downsample_gaussian_sigma_mpc_h: float | None = None,
+    downsample_threads: int = 1,
     class_n_modes: int = 4000,
     quijote_fiducial: dict[str, float] | None = None,
     output_dir: Path | None = None,
@@ -173,7 +185,15 @@ def run_lpt_emulator_pipeline(
     compute_vel
         If True, run emulator velocity head and return/save `vel_emu`.
     delta_upsample_method
-        Upsampling mode for resizing fields: `\"mode_inject\"`, `\"fourier\"`, or `\"linear\"`.
+        Upsampling mode for resizing external IC fields: `\"mode_inject\"`, `\"fourier\"`, or `\"linear\"`.
+    downsample_method
+        Downsampling mode used only when resizing external IC fields to a lower resolution:
+        `\"gaussian\"` (Pylians smoothing + block average) or `\"block_average\"`.
+    downsample_gaussian_sigma_mpc_h
+        Gaussian smoothing radius in Mpc/h used for external-IC downsampling when
+        `downsample_method=\"gaussian\"`. If None, defaults internally to one target-grid cell.
+    downsample_threads
+        Thread count passed to Pylians smoothing for external-IC Gaussian downsampling.
     class_n_modes
         Number of k-samples for CLASS linear P(k) table when seed-based IC mode is used.
     quijote_fiducial
@@ -205,6 +225,7 @@ def run_lpt_emulator_pipeline(
         mas_worder=int(mas_worder),
         class_n_modes=int(class_n_modes),
         delta_upsample_method=str(delta_upsample_method),
+        downsample_method=str(downsample_method),
     )
 
     add_import_paths(repo_root=REPO_ROOT)
@@ -308,6 +329,9 @@ def run_lpt_emulator_pipeline(
                     class_cosmo_params=class_params,
                     class_z=float(z_target),
                     class_n_modes=int(class_n_modes),
+                    downsample_method=str(downsample_method),
+                    downsample_gaussian_sigma_mpc_h=downsample_gaussian_sigma_mpc_h,
+                    downsample_threads=int(downsample_threads),
                 )
                 resize_input_to_npart_seconds = time.perf_counter() - t_resize
                 print(
@@ -322,7 +346,26 @@ def run_lpt_emulator_pipeline(
 
             dj = dj.with_external_ics(delta=ics_grf_npart)
 
-        if n_part != density_res:
+        if n_part > density_res:
+            print(
+                f"Projecting linear field to summary grid via PM/MAS ({n_part}^3 -> {density_res}^3), "
+                f"worder={int(mas_worder)}, deconvolve={bool(deconvolve_mas)}...",
+                flush=True,
+            )
+            t_resize = time.perf_counter()
+            ics_grf = project_field_from_particles(
+                dj=dj,
+                field_npart=np.asarray(ics_grf_npart, dtype=np.float32),
+                target_res=int(density_res),
+                mas_worder=int(mas_worder),
+                deconvolve_mas=bool(deconvolve_mas),
+            )
+            resize_npart_to_density_seconds = time.perf_counter() - t_resize
+            print(
+                f"Finished PM/MAS projection for linear summary field in {resize_npart_to_density_seconds:.2f} s.",
+                flush=True,
+            )
+        elif n_part < density_res:
             print(
                 f"Resizing linear field for summaries ({n_part}^3 -> {density_res}^3) "
                 f"with '{delta_upsample_method}'...",
@@ -337,6 +380,9 @@ def run_lpt_emulator_pipeline(
                 class_cosmo_params=class_params,
                 class_z=float(z_target),
                 class_n_modes=int(class_n_modes),
+                downsample_method=str(downsample_method),
+                downsample_gaussian_sigma_mpc_h=downsample_gaussian_sigma_mpc_h,
+                downsample_threads=int(downsample_threads),
             )
             resize_npart_to_density_seconds = time.perf_counter() - t_resize
             print(
@@ -418,7 +464,15 @@ def run_lpt_emulator_pipeline(
             "input_delta_original_shape": input_delta_original_shape,
             "delta_input_scale": float(delta_input_scale),
             "delta_upsample_method": delta_upsample_method,
+            "downsample_method": str(downsample_method),
+            "downsample_gaussian_sigma_mpc_h": (
+                None if downsample_gaussian_sigma_mpc_h is None else float(downsample_gaussian_sigma_mpc_h)
+            ),
+            "downsample_threads": int(downsample_threads),
             "delta_upsample_ratio": delta_upsample_ratio,
+            "linear_summary_mapping_method": (
+                "particle_mas_projection" if n_part > density_res else ("resize_density_grid" if n_part < density_res else "identity")
+            ),
             "n_part": n_part,
             "res": density_res,
             "boxsize_mpc_over_h": float(boxsize),

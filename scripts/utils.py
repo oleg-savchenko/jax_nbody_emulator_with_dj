@@ -4,7 +4,9 @@ Plotting and summary helpers for DISCO-DJ + emulator workflows.
 This module contains:
   - Slice visualization for IC/LPT/emulated density fields
   - MAS-kernel deconvolution helpers
+  - Particle-to-grid projection helpers
   - P(k) comparisons against CLASS
+  - Voxelized Minkowski functional summaries
   - Quijote target-vs-model summary diagnostics
 """
 
@@ -44,6 +46,14 @@ else:
     _PKL_IMPORT_ERROR = None
 
 try:
+    import smoothing_library as SL
+except ImportError as exc:  # pragma: no cover - optional dependency at import time
+    SL = None
+    _SL_IMPORT_ERROR = exc
+else:
+    _SL_IMPORT_ERROR = None
+
+try:
     import jax
     import jax.numpy as jnp
     import jax.random as jrandom
@@ -54,6 +64,14 @@ except ImportError as exc:  # pragma: no cover - optional dependency at import t
     _JAX_IMPORT_ERROR = exc
 else:
     _JAX_IMPORT_ERROR = None
+
+try:
+    from discodj import DiscoDJ
+except ImportError as exc:  # pragma: no cover - optional dependency at import time
+    DiscoDJ = None
+    _DISCODJ_IMPORT_ERROR = exc
+else:
+    _DISCODJ_IMPORT_ERROR = None
 
 
 QUIJOTE_FIDUCIAL_CLASS = {
@@ -127,6 +145,41 @@ def deconvolve_mas_kernel(
         ) from _DISCODJ_SCATTER_GATHER_IMPORT_ERROR
     delta = np.asarray(delta, dtype=np.float32)
     out = compensate_mak(delta, worder=int(worder), with_jax=bool(with_jax))
+    return np.asarray(out, dtype=np.float32)
+
+
+def project_field_from_particles(
+    *,
+    dj: DiscoDJ,
+    field_npart: np.ndarray,
+    target_res: int,
+    mas_worder: int,
+    deconvolve_mas: bool,
+) -> np.ndarray:
+    """Project a scalar particle-grid field to a target mesh via PM/MAS deposition."""
+    if DiscoDJ is None:
+        raise ImportError("DISCO-DJ is unavailable.") from _DISCODJ_IMPORT_ERROR
+    if jnp is None:
+        raise ImportError("JAX is unavailable.") from _JAX_IMPORT_ERROR
+
+    field_npart = np.asarray(field_npart, dtype=np.float32)
+    if field_npart.ndim != 3 or len(set(field_npart.shape)) != 1:
+        raise ValueError(f"`field_npart` must be cubic 3D, got shape={field_npart.shape}")
+    if int(target_res) < 1:
+        raise ValueError(f"`target_res` must be >= 1, got {target_res}.")
+
+    q = jnp.asarray(np.asarray(dj.q, dtype=np.float32), dtype=jnp.float32)
+    quantity_flat = jnp.asarray(field_npart.reshape(-1), dtype=jnp.float32)
+    out = dj.compute_field_quantity_from_particles(
+        pos=q,
+        quantity=quantity_flat,
+        method="pm",
+        res=int(target_res),
+        worder=int(mas_worder),
+        deconvolve=bool(deconvolve_mas),
+        try_to_jit=False,
+        normalize_by_density=True,
+    )
     return np.asarray(out, dtype=np.float32)
 
 
@@ -502,6 +555,43 @@ def downsample_density_block_average(
     return np.asarray(out, dtype=np.float32)
 
 
+def downsample_density_gaussian_pylians(
+    delta_in: np.ndarray,
+    target_res: int,
+    boxsize: float,
+    *,
+    sigma_mpc_h: float | None = None,
+    threads: int = 1,
+) -> np.ndarray:
+    """
+    Downsample a cubic periodic density field using Pylians Gaussian smoothing plus block averaging.
+
+    The smoothing radius `sigma_mpc_h` is in Mpc/h. If omitted, the default is one target-grid cell:
+        sigma = boxsize / target_res
+    """
+    if SL is None:
+        raise ImportError(
+            "Pylians smoothing_library is unavailable. Install Pylians3 to use Gaussian downsampling."
+        ) from _SL_IMPORT_ERROR
+
+    delta_in = np.asarray(delta_in, dtype=np.float32)
+    in_res = int(delta_in.shape[0])
+    if in_res == target_res:
+        return delta_in
+    if in_res % target_res != 0:
+        raise ValueError(
+            f"Cannot downsample from {in_res} to {target_res}: input must be an integer multiple."
+        )
+
+    sigma = float(boxsize) / float(target_res) if sigma_mpc_h is None else float(sigma_mpc_h)
+    if sigma <= 0.0:
+        raise ValueError(f"`sigma_mpc_h` must be > 0, got {sigma}.")
+
+    w_k = SL.FT_filter(float(boxsize), float(sigma), int(in_res), "Gaussian", int(threads))
+    smoothed = SL.field_smoothing(np.ascontiguousarray(delta_in, dtype=np.float32), w_k, int(threads))
+    return downsample_density_block_average(np.asarray(smoothed, dtype=np.float32), target_res=target_res)
+
+
 def resize_density_grid(
     delta_in: np.ndarray,
     target_res: int,
@@ -510,10 +600,14 @@ def resize_density_grid(
     class_cosmo_params: dict[str, float] | None = None,
     class_z: float = 0.0,
     class_n_modes: int = 4096,
+    downsample_method: str = "gaussian",
+    downsample_gaussian_sigma_mpc_h: float | None = None,
+    downsample_threads: int = 1,
 ) -> np.ndarray:
     """
     Resize a cubic periodic density field between resolutions.
-    Upsampling can use DISCO-DJ interpolation or mode injection; downsampling uses block averaging.
+    Upsampling can use DISCO-DJ interpolation or mode injection.
+    Downsampling defaults to Pylians Gaussian smoothing + block averaging.
     """
     in_res = int(np.asarray(delta_in).shape[0])
     if in_res == target_res:
@@ -539,7 +633,229 @@ def resize_density_grid(
             boxsize=boxsize,
             method=upsample_method,
         )
-    return downsample_density_block_average(delta_in=delta_in, target_res=target_res)
+    if downsample_method == "gaussian":
+        return downsample_density_gaussian_pylians(
+            delta_in=delta_in,
+            target_res=target_res,
+            boxsize=boxsize,
+            sigma_mpc_h=downsample_gaussian_sigma_mpc_h,
+            threads=int(downsample_threads),
+        )
+    if downsample_method == "block_average":
+        return downsample_density_block_average(delta_in=delta_in, target_res=target_res)
+    raise ValueError(
+        f"Unknown downsample method: {downsample_method!r}. "
+        "Expected one of: 'gaussian', 'block_average'."
+    )
+
+
+def _count_cubical_complex_elements_periodic(mask: np.ndarray) -> tuple[int, int, int, int]:
+    """Count occupied vertices/edges/faces/cubes in a periodic 3D cubical complex."""
+    m = np.asarray(mask, dtype=bool)
+    if m.ndim != 3 or not (m.shape[0] == m.shape[1] == m.shape[2]):
+        raise ValueError(f"`mask` must be a cubic 3D array, got shape={m.shape}.")
+
+    n3 = int(np.count_nonzero(m))
+    if n3 == 0:
+        return 0, 0, 0, 0
+
+    n2 = 0
+    for axis in range(3):
+        faces = m | np.roll(m, shift=1, axis=axis)
+        n2 += int(np.count_nonzero(faces))
+
+    n1 = 0
+    edge_x = m | np.roll(m, shift=1, axis=1)
+    edge_x |= np.roll(m, shift=1, axis=2)
+    edge_x |= np.roll(np.roll(m, shift=1, axis=1), shift=1, axis=2)
+    n1 += int(np.count_nonzero(edge_x))
+
+    edge_y = m | np.roll(m, shift=1, axis=0)
+    edge_y |= np.roll(m, shift=1, axis=2)
+    edge_y |= np.roll(np.roll(m, shift=1, axis=0), shift=1, axis=2)
+    n1 += int(np.count_nonzero(edge_y))
+
+    edge_z = m | np.roll(m, shift=1, axis=0)
+    edge_z |= np.roll(m, shift=1, axis=1)
+    edge_z |= np.roll(np.roll(m, shift=1, axis=0), shift=1, axis=1)
+    n1 += int(np.count_nonzero(edge_z))
+
+    n0_mask = m.copy()
+    for sx in (0, 1):
+        for sy in (0, 1):
+            for sz in (0, 1):
+                if sx == 0 and sy == 0 and sz == 0:
+                    continue
+                n0_mask |= np.roll(m, shift=(sx, sy, sz), axis=(0, 1, 2))
+    n0 = int(np.count_nonzero(n0_mask))
+    return n0, n1, n2, n3
+
+
+def compute_minkowski_functionals(
+    field: np.ndarray,
+    boxsize: float,
+    *,
+    thresholds: np.ndarray | None = None,
+    standardize: bool = True,
+) -> dict[str, np.ndarray | float | bool | str]:
+    """
+    Compute voxelized periodic Minkowski-functional densities for excursion sets.
+
+    The returned arrays correspond to a discrete cubical-complex convention:
+      - `v0`: volume fraction
+      - `v1`: surface-like density [h/Mpc]
+      - `v2`: curvature-like density [h^2/Mpc^2]
+      - `v3`: Euler-characteristic density [(Mpc/h)^-3]
+    """
+    field = np.asarray(field, dtype=np.float32)
+    if field.ndim != 3 or not (field.shape[0] == field.shape[1] == field.shape[2]):
+        raise ValueError(f"`field` must be a cubic 3D array, got shape={field.shape}.")
+
+    if thresholds is None:
+        thresholds_arr = np.linspace(-3.0, 3.0, 41, dtype=np.float32)
+    else:
+        thresholds_arr = np.asarray(thresholds, dtype=np.float32).ravel()
+        if thresholds_arr.size < 2:
+            raise ValueError("`thresholds` must contain at least two values.")
+
+    mu = float(np.mean(field))
+    sigma = float(np.std(field))
+    if standardize and sigma > 0.0:
+        work_field = (field - np.float32(mu)) / np.float32(sigma)
+    elif standardize:
+        work_field = np.zeros_like(field, dtype=np.float32)
+    else:
+        work_field = np.asarray(field, dtype=np.float32)
+
+    n = int(field.shape[0])
+    voxel = float(boxsize) / float(n)
+    box_volume = float(boxsize) ** 3
+
+    v0 = np.empty_like(thresholds_arr, dtype=np.float64)
+    v1 = np.empty_like(thresholds_arr, dtype=np.float64)
+    v2 = np.empty_like(thresholds_arr, dtype=np.float64)
+    v3 = np.empty_like(thresholds_arr, dtype=np.float64)
+
+    for i, thr in enumerate(thresholds_arr):
+        mask = work_field >= np.float32(thr)
+        n0, n1, n2, n3 = _count_cubical_complex_elements_periodic(mask)
+
+        m0 = (voxel**3) * float(n3)
+        m1 = (voxel**2) * ((-2.0 / 3.0) * float(n3) + (2.0 / 9.0) * float(n2))
+        m2 = voxel * ((2.0 / 3.0) * float(n3) - (4.0 / 9.0) * float(n2) + (2.0 / 9.0) * float(n1))
+        m3 = float(n0 - n1 + n2 - n3)
+
+        v0[i] = m0 / box_volume
+        v1[i] = m1 / box_volume
+        v2[i] = m2 / box_volume
+        v3[i] = m3 / box_volume
+
+    return {
+        "thresholds": thresholds_arr.astype(np.float64),
+        "v0": v0,
+        "v1": v1,
+        "v2": v2,
+        "v3": v3,
+        "mean": mu,
+        "std": sigma,
+        "standardize": bool(standardize),
+        "convention": "periodic_voxel_cubical_complex",
+    }
+
+
+def plot_minkowski_functionals(
+    fields: dict[str, np.ndarray],
+    boxsize: float,
+    out_path: Path,
+    *,
+    thresholds: np.ndarray | None = None,
+    standardize: bool = True,
+) -> dict[str, dict[str, np.ndarray | float | bool | str]]:
+    """Plot V0..V3 threshold curves for one or more density fields."""
+    if len(fields) == 0:
+        raise ValueError("`fields` must contain at least one named field.")
+
+    results: dict[str, dict[str, np.ndarray | float | bool | str]] = {}
+    for label, field in fields.items():
+        results[label] = compute_minkowski_functionals(
+            field=np.asarray(field, dtype=np.float32),
+            boxsize=float(boxsize),
+            thresholds=thresholds,
+            standardize=bool(standardize),
+        )
+
+    keys = ["v0", "v1", "v2", "v3"]
+    ylabels = [
+        r"$V_0$ (volume fraction)",
+        r"$V_1$ [$h/{\rm Mpc}$]",
+        r"$V_2$ [$h^2/{\rm Mpc}^2$]",
+        r"$V_3$ [$(\mathrm{Mpc}/h)^{-3}$]",
+    ]
+    titles = ["Volume", "Surface", "Curvature", "Euler characteristic"]
+
+    fig, axes = plt.subplots(
+        2,
+        2,
+        figsize=(9.2, 7.0),
+        sharex=True,
+        constrained_layout=True,
+    )
+    axes_flat = axes.ravel()
+
+    labels = list(results.keys())
+    has_quijote_target = any(("quijote" in lbl.lower()) or ("target" in lbl.lower()) for lbl in labels)
+    has_emulator = any(("emulator" in lbl.lower()) or ("emulated" in lbl.lower()) for lbl in labels)
+
+    for idx, (key, ylabel, title) in enumerate(zip(keys, ylabels, titles)):
+        ax = axes_flat[idx]
+        for label, res in results.items():
+            thr = np.asarray(res["thresholds"], dtype=np.float64)
+            val = np.asarray(res[key], dtype=np.float64)
+            style = {"lw": 1.2, "alpha": 0.95, "zorder": 2}
+            lower = label.lower()
+            if has_quijote_target and has_emulator:
+                if ("quijote" in lower) or ("target" in lower):
+                    style.update({"linestyle": "-", "lw": 2.2, "zorder": 3, "color": "tab:blue"})
+                elif ("emulator" in lower) or ("emulated" in lower):
+                    style.update(
+                        {"linestyle": (0, (3, 2)), "lw": 1.4, "zorder": 6, "color": "tab:red"}
+                    )
+                elif "lpt" in lower:
+                    style.update({"linestyle": "-", "zorder": 3, "color": "tab:orange"})
+            ax.plot(thr, val, label=label, **style)
+        ax.set_title(title)
+        ax.set_ylabel(ylabel)
+        ax.grid(alpha=0.15)
+        if idx >= 2:
+            ax.set_xlabel(r"$\nu$")
+
+    std_suffix = r"$\nu=(\delta-\mu)/\sigma$" if standardize else r"$\nu=\delta$"
+    handles, legend_labels = axes_flat[0].get_legend_handles_labels()
+    if has_quijote_target and len(handles) == len(legend_labels):
+        entries = list(zip(handles, legend_labels))
+
+        def _legend_rank(item: tuple[object, str]) -> tuple[int, int]:
+            lbl = item[1].lower()
+            if "lpt" in lbl:
+                return (99, 0)
+            if ("quijote" in lbl) or ("target" in lbl):
+                return (0, 0)
+            if ("emulator" in lbl) or ("emulated" in lbl):
+                return (1, 0)
+            return (2, 0)
+
+        entries_sorted = sorted(entries, key=_legend_rank)
+        handles_sorted = [h for h, _ in entries_sorted]
+        labels_sorted = [l for _, l in entries_sorted]
+        axes_flat[0].legend(handles_sorted, labels_sorted, framealpha=0.9, fontsize=8)
+    else:
+        axes_flat[0].legend(framealpha=0.9, fontsize=8)
+    fig.suptitle(f"Minkowski functionals ({std_suffix})", fontsize=12)
+
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(out_path, dpi=180)
+    plt.close(fig)
+    return results
 
 
 def plot_density_slices(

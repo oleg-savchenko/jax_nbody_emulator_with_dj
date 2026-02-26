@@ -11,7 +11,8 @@ This script:
 4. Builds 1LPT initial displacement from the rescaled IC field.
 5. Runs the pretrained emulator forward to `z_target`.
 6. Compares emulator outputs against the Quijote target via summary diagnostics.
-7. Applies MAS deconvolution to generated fields by default, and optionally to the target field.
+7. Saves a Minkowski-functional comparison plot for target/LPT/emulator fields.
+8. Applies MAS deconvolution to generated fields by default, and optionally to the target field.
 
 Example usage with all CLI arguments:
 
@@ -32,7 +33,7 @@ python scripts/quijote_comparison.py \
   --target-upsample-method fourier \
   --output-dir outputs/quijote_sample0_emulator_compare
 
-Plot-only mode (reuse saved fields in output dir, no emulator run):
+Plot-only mode (reuse saved fields in output dir, no emulator run; regenerates slices/P(k)+summary/Minkowski):
 python scripts/quijote_comparison.py \
   --plot-only \
   --output-dir outputs/quijote_sample0_emulator_compare
@@ -60,6 +61,7 @@ from utils import (
     mas_from_worder,
     parse_ndiv,
     plot_emulator_vs_target_summary,
+    plot_minkowski_functionals,
     plot_quijote_emulator_slices,
     resize_density_grid,
 )
@@ -271,6 +273,7 @@ def main() -> None:
         summary_plot_path = out_dir / "2_power_spectrum.png"
         pdf_plot_path = out_dir / "1_1pt_pdf.png"
         bispec_plot_path = out_dir / "3_bispectrum.png"
+        minkowski_plot_path = out_dir / "4_minkowski.png"
         summary = plot_emulator_vs_target_summary(
             delta_target=np.asarray(delta_target, dtype=np.float32),
             delta_lpt=np.asarray(delta_lpt, dtype=np.float32),
@@ -284,6 +287,16 @@ def main() -> None:
             mas_deconvolved_target_field=bool(target_assumed_predeconvolved or args.deconvolve_mas_target),
             class_cosmo_params=class_params,
             z=float(args.z_target),
+        )
+        plot_minkowski_functionals(
+            fields={
+                "Quijote target": np.asarray(delta_target, dtype=np.float32),
+                "LPT": np.asarray(delta_lpt, dtype=np.float32),
+                "Emulator": np.asarray(delta_emu, dtype=np.float32),
+            },
+            boxsize=float(args.boxsize),
+            out_path=minkowski_plot_path,
+            standardize=True,
         )
 
         metadata_path = out_dir / "metadata.json"
@@ -302,6 +315,7 @@ def main() -> None:
                 "summary_plot": str(summary_plot_path),
                 "summary_1pt_pdf_plot": str(pdf_plot_path),
                 "summary_bispectrum_plot": str(bispec_plot_path),
+                "summary_minkowski_plot": str(minkowski_plot_path),
                 "slices_plot": str(slices_path),
             }
         )
@@ -314,6 +328,7 @@ def main() -> None:
         print(f"  - {summary_plot_path.name}")
         print(f"  - {pdf_plot_path.name}")
         print(f"  - {bispec_plot_path.name}")
+        print(f"  - {minkowski_plot_path.name}")
         print(f"Updated metadata: {metadata_path}")
         return
 
@@ -444,6 +459,7 @@ def main() -> None:
     summary_plot_path = out_dir / "2_power_spectrum.png"
     pdf_plot_path = out_dir / "1_1pt_pdf.png"
     bispec_plot_path = out_dir / "3_bispectrum.png"
+    minkowski_plot_path = out_dir / "4_minkowski.png"
     summary = plot_emulator_vs_target_summary(
         delta_target=np.asarray(delta_target, dtype=np.float32),
         delta_lpt=np.asarray(delta_lpt, dtype=np.float32),
@@ -457,6 +473,16 @@ def main() -> None:
         mas_deconvolved_target_field=bool(target_assumed_predeconvolved or args.deconvolve_mas_target),
         class_cosmo_params=class_params,
         z=float(args.z_target),
+    )
+    plot_minkowski_functionals(
+        fields={
+            "Quijote target": np.asarray(delta_target, dtype=np.float32),
+            "LPT": np.asarray(delta_lpt, dtype=np.float32),
+            "Emulator": np.asarray(delta_emu, dtype=np.float32),
+        },
+        boxsize=float(args.boxsize),
+        out_path=minkowski_plot_path,
+        standardize=True,
     )
 
     save_array(out_dir / "quijote_target.npy", np.asarray(delta_target, dtype=np.float32))
@@ -507,6 +533,7 @@ def main() -> None:
             "summary_plot": str(summary_plot_path),
             "summary_1pt_pdf_plot": str(pdf_plot_path),
             "summary_bispectrum_plot": str(bispec_plot_path),
+            "summary_minkowski_plot": str(minkowski_plot_path),
             "slices_plot": str(slices_path),
         }
     )
@@ -536,6 +563,7 @@ def main() -> None:
             summary_plot_path.name,
             pdf_plot_path.name,
             bispec_plot_path.name,
+            minkowski_plot_path.name,
             "metadata.json",
         ]
     )

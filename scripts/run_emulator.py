@@ -5,11 +5,13 @@ End-to-end IC -> emulator -> density pipeline.
 This script:
 1. Uses DISCO-DJ to generate N-GenIC-compatible white noise for a fixed seed.
 2. Builds the corresponding linear Gaussian density field at z=0 (scaled by linear P(k)).
+   If `n_part > res`, this field is projected to the summary grid via PM/MAS deposition
+   (with optional MAS deconvolution), not Gaussian downsampled.
 3. Builds ZA/1LPT displacement at z=0 for fiducial Quijote cosmology.
 4. Runs the pretrained jax_nbody_emulator forward from the initial displacement.
 5. Computes density fields from LPT and emulated displacements (via DISCO-DJ MAS).
 6. Deconvolves MAS kernels from generated density fields by default.
-7. Saves diagnostic plots and output arrays.
+7. Saves diagnostic plots (slices, P(k), Minkowski functionals) and output arrays.
 
 Outputs are written as .npy arrays plus a metadata JSON.
 
@@ -42,7 +44,7 @@ python scripts/run_emulator.py \
   --num-sims 1 \
   --output-dir outputs/discodj_emulator_from_delta
 
-Plot-only mode (reuse saved fields in output dir, no emulator run):
+Plot-only mode (reuse saved fields in output dir, no emulator run; regenerates slices/P(k)/Minkowski):
 
 python scripts/run_emulator.py \
   --plot-only \
@@ -65,6 +67,7 @@ from utils import (
     parse_ndiv,
     plot_density_power_spectra,
     plot_density_slices,
+    plot_minkowski_functionals,
 )
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -278,6 +281,17 @@ def main() -> None:
             mas_deconvolved_fields=fields_are_deconvolved,
             non_linear_theory=PLOT_NONLINEAR_THEORY,
         )
+        minkowski_plot_path = out_dir / "density_minkowski_z0.png"
+        plot_minkowski_functionals(
+            fields={
+                "ICs GRF": np.asarray(ics_grf, dtype=np.float32),
+                "LPT": np.asarray(delta_lpt, dtype=np.float32),
+                "Emulated": np.asarray(delta_emu, dtype=np.float32),
+            },
+            boxsize=float(boxsize),
+            out_path=minkowski_plot_path,
+            standardize=True,
+        )
 
         metadata.update(
             {
@@ -289,6 +303,7 @@ def main() -> None:
                 "plot_nonlinear_theory": PLOT_NONLINEAR_THEORY,
                 "density_slice_plot": str(slice_plot_path),
                 "density_pk_plot": str(pk_plot_path),
+                "density_minkowski_plot": str(minkowski_plot_path),
             }
         )
         metadata_path.write_text(json.dumps(metadata, indent=2))
@@ -298,6 +313,7 @@ def main() -> None:
         print("Saved plots:")
         print(f"  - {slice_plot_path.name}")
         print(f"  - {pk_plot_path.name}")
+        print(f"  - {minkowski_plot_path.name}")
         print(f"Updated metadata: {metadata_path}")
         return
 
@@ -365,6 +381,18 @@ def main() -> None:
         mas_deconvolved_fields=bool(args.deconvolve_mas),
         non_linear_theory=PLOT_NONLINEAR_THEORY,
     )
+    
+    minkowski_plot_path = out_dir / "density_minkowski_z0.png"
+    plot_minkowski_functionals(
+        fields={
+            "ICs GRF": ics_grf,
+            "LPT": delta_lpt,
+            "Emulated": delta_emu,
+        },
+        boxsize=float(args.boxsize),
+        out_path=minkowski_plot_path,
+        standardize=True,
+    )
 
     metadata = dict(pipeline["metadata"])
     saved_paths = dict(pipeline.get("saved_paths", {}))
@@ -376,6 +404,7 @@ def main() -> None:
             "deconvolve_mas": bool(args.deconvolve_mas),
             "density_slice_plot": str(slice_plot_path),
             "density_pk_plot": str(pk_plot_path),
+            "density_minkowski_plot": str(minkowski_plot_path),
             "ics_grf_field": saved_paths.get("ics_grf", str(out_dir / "ics_grf.npy")),
             "delta_linear_z0_field": saved_paths.get("delta_linear", str(out_dir / "delta_linear_z0.npy")),
             "delta_linear_z0_npart_field": saved_paths.get("delta_linear_npart"),
@@ -414,6 +443,7 @@ def main() -> None:
         [
             "density_slices_z0.png",
             "density_pk_vs_class_z0.png",
+            "density_minkowski_z0.png",
         ]
     )
     if pipeline.get("class_pk_table_path") is not None:

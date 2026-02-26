@@ -5,8 +5,8 @@
 #SBATCH --gpus=1
 #SBATCH --partition=gpu_a100
 #SBATCH --time=0:20:00
-#SBATCH --output=/home/osavchenko/jax_nbody_emulator/jobs_output/%x-%j-%N_slurm.out
-#SBATCH --error=/home/osavchenko/jax_nbody_emulator/jobs_output/R-%x.%j.err
+#SBATCH --output=/home/osavchenko/jax_nbody_emulator/jobs_outputs/%x-%j-%N_slurm.out
+#SBATCH --error=/home/osavchenko/jax_nbody_emulator/jobs_outputs/R-%x.%j.err
 ## Activate right env
 
 module load 2024
@@ -41,5 +41,17 @@ cd /home/osavchenko/jax_nbody_emulator
 #   --num-sims 3 \
 #   --output-dir outputs/discodj_emulator_seed42_res128_box250
 
-python scripts/quijote_comparison.py
+python scripts/run_emulator.py \
+  --seed 42 \
+  --n-part 256 \
+  --res 128 \
+  --boxsize 500 \
+  --ndiv 1,1,1 \
+  --num-sims 1 \
+  --emu-precision f16 \
+  --output-dir outputs/discodj_emulator_res256_box500 \
+  --no-compute-vel \
+  --mas-worder 2
+
+# python scripts/quijote_comparison.py
   
