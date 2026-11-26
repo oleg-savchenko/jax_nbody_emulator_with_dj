@@ -163,3 +163,9 @@ jobs_output/
 
 # JAX compiled cache
 __jaxlib_cache__/
+
+# Local environments, job logs and personal files
+.venv*/
+jobs_outputs/
+thesis_cover/
+.codex
