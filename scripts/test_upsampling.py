@@ -194,6 +194,8 @@ def make_plot(
     pk_low: np.ndarray,
     k_up: np.ndarray,
     pk_up: np.ndarray,
+    k_back_block: np.ndarray,
+    pk_back_block: np.ndarray,
     k_cross_gaussian: np.ndarray,
     c_cross_gaussian: np.ndarray,
     k_cross_block: np.ndarray,
@@ -209,6 +211,7 @@ def make_plot(
     """Plot P(k), ratio-to-CLASS, and cross-correlation diagnostics."""
     pk_class_low = np.interp(k_low, k_class, pk_class)
     pk_class_up = np.interp(k_up, k_class, pk_class)
+    pk_class_back_block = np.interp(k_back_block, k_class, pk_class)
 
     k_nyq_low = np.pi * int(res_low) / float(boxsize)
     k_nyq_up = np.pi * int(res_up) / float(boxsize)
@@ -225,6 +228,12 @@ def make_plot(
     ax = axes[0]
     ax.plot(k_low, pk_low, lw=1.3, label=f"Input GRF ({res_low}^3)")
     ax.plot(k_up, pk_up, lw=1.3, label=f"Upsampled GRF ({res_up}^3)")
+    ax.plot(
+        k_back_block,
+        pk_back_block,
+        lw=1.3,
+        label=f"Block-downsampled back ({res_low}^3)",
+    )
     ax.plot(k_class, pk_class, "k--", lw=1.2, alpha=0.85, label="CLASS linear")
     ax.axvline(k_nyq_low, color="tab:green", ls="--", lw=0.9, alpha=0.8, label=r"$k_{\rm Nyq, in}$")
     ax.axvline(k_nyq_up, color="tab:red", ls=":", lw=0.9, alpha=0.8, label=r"$k_{\rm Nyq, up}$")
@@ -239,6 +248,12 @@ def make_plot(
     ax = axes[1]
     ax.plot(k_low, pk_low / pk_class_low, lw=1.3, label="Input / CLASS")
     ax.plot(k_up, pk_up / pk_class_up, lw=1.3, label="Upsampled / CLASS")
+    ax.plot(
+        k_back_block,
+        pk_back_block / pk_class_back_block,
+        lw=1.3,
+        label="Block-downsampled back / CLASS",
+    )
     ax.axhline(1.0, color="black", ls="--", lw=0.8)
     ax.axvline(k_nyq_low, color="tab:green", ls="--", lw=0.9, alpha=0.8)
     ax.axvline(k_nyq_up, color="tab:red", ls=":", lw=0.9, alpha=0.8)
@@ -401,6 +416,7 @@ def main() -> None:
     t0 = time.perf_counter()
     k_low, pk_low = compute_pk(delta_low, boxsize=float(args.boxsize))
     k_up, pk_up = compute_pk(delta_up, boxsize=float(args.boxsize))
+    k_back_block, pk_back_block = compute_pk(delta_up_back_low_block, boxsize=float(args.boxsize))
     k_cross_gaussian, c_cross_gaussian = compute_crosscorr(
         delta_low, delta_up_back_low_gaussian, boxsize=float(args.boxsize)
     )
@@ -431,6 +447,8 @@ def main() -> None:
         pk_low=pk_low,
         k_up=k_up,
         pk_up=pk_up,
+        k_back_block=k_back_block,
+        pk_back_block=pk_back_block,
         k_cross_gaussian=k_cross_gaussian,
         c_cross_gaussian=c_cross_gaussian,
         k_cross_block=k_cross_block,

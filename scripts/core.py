@@ -25,7 +25,6 @@ from utils import (
     add_import_paths,
     format_hms,
     get_pk_class,
-    project_field_from_particles,
     resize_density_grid,
 )
 
@@ -89,8 +88,10 @@ def _validate_pipeline_args(
         raise ValueError("`class_n_modes` must be >= 2.")
     if delta_upsample_method not in {"mode_inject", "fourier", "linear"}:
         raise ValueError("`delta_upsample_method` must be one of: 'mode_inject', 'fourier', 'linear'.")
-    if downsample_method not in {"gaussian", "block_average"}:
-        raise ValueError("`downsample_method` must be one of: 'gaussian', 'block_average'.")
+    if downsample_method not in {"fourier_truncation", "gaussian", "block_average"}:
+        raise ValueError(
+            "`downsample_method` must be one of: 'fourier_truncation', 'gaussian', 'block_average'."
+        )
 
 
 def _cosmo_dicts(quijote_fiducial: dict[str, float]) -> tuple[dict[str, float], dict[str, float]]:
@@ -141,10 +142,11 @@ def run_lpt_emulator_pipeline(
     z_target: float = 0.0,
     compute_vel: bool = False,
     delta_upsample_method: str = "mode_inject",
-    downsample_method: str = "gaussian",
+    downsample_method: str = "fourier_truncation",
     downsample_gaussian_sigma_mpc_h: float | None = None,
     downsample_threads: int = 1,
     class_n_modes: int = 4000,
+    mode_inject_seed: int | None = None,
     quijote_fiducial: dict[str, float] | None = None,
     output_dir: Path | None = None,
     save_outputs: bool = True,
@@ -188,7 +190,8 @@ def run_lpt_emulator_pipeline(
         Upsampling mode for resizing external IC fields: `\"mode_inject\"`, `\"fourier\"`, or `\"linear\"`.
     downsample_method
         Downsampling mode used only when resizing external IC fields to a lower resolution:
-        `\"gaussian\"` (Pylians smoothing + block average) or `\"block_average\"`.
+        `\"fourier_truncation\"` (default), `\"gaussian\"` (Pylians smoothing + block average),
+        or `\"block_average\"`.
     downsample_gaussian_sigma_mpc_h
         Gaussian smoothing radius in Mpc/h used for external-IC downsampling when
         `downsample_method=\"gaussian\"`. If None, defaults internally to one target-grid cell.
@@ -196,6 +199,8 @@ def run_lpt_emulator_pipeline(
         Thread count passed to Pylians smoothing for external-IC Gaussian downsampling.
     class_n_modes
         Number of k-samples for CLASS linear P(k) table when seed-based IC mode is used.
+    mode_inject_seed
+        Optional RNG seed used by `mode_inject` upsampling. Ignored for other upsampling methods.
     quijote_fiducial
         Cosmology dictionary with keys `Omega_m`, `Omega_b`, `h`, `n_s`, `sigma8`.
         If None, uses built-in fiducial Quijote values.
@@ -329,6 +334,7 @@ def run_lpt_emulator_pipeline(
                     class_cosmo_params=class_params,
                     class_z=float(z_target),
                     class_n_modes=int(class_n_modes),
+                    mode_inject_seed=None if mode_inject_seed is None else int(mode_inject_seed),
                     downsample_method=str(downsample_method),
                     downsample_gaussian_sigma_mpc_h=downsample_gaussian_sigma_mpc_h,
                     downsample_threads=int(downsample_threads),
@@ -348,21 +354,27 @@ def run_lpt_emulator_pipeline(
 
         if n_part > density_res:
             print(
-                f"Projecting linear field to summary grid via PM/MAS ({n_part}^3 -> {density_res}^3), "
-                f"worder={int(mas_worder)}, deconvolve={bool(deconvolve_mas)}...",
+                f"Downsampling linear field for summaries via Fourier truncation "
+                f"({n_part}^3 -> {density_res}^3)...",
                 flush=True,
             )
             t_resize = time.perf_counter()
-            ics_grf = project_field_from_particles(
-                dj=dj,
-                field_npart=np.asarray(ics_grf_npart, dtype=np.float32),
+            ics_grf = resize_density_grid(
+                delta_in=np.asarray(ics_grf_npart, dtype=np.float32),
                 target_res=int(density_res),
-                mas_worder=int(mas_worder),
-                deconvolve_mas=bool(deconvolve_mas),
+                boxsize=float(boxsize),
+                upsample_method=str(delta_upsample_method),
+                class_cosmo_params=class_params,
+                class_z=float(z_target),
+                class_n_modes=int(class_n_modes),
+                mode_inject_seed=None if mode_inject_seed is None else int(mode_inject_seed),
+                downsample_method="fourier_truncation",
+                downsample_gaussian_sigma_mpc_h=downsample_gaussian_sigma_mpc_h,
+                downsample_threads=int(downsample_threads),
             )
             resize_npart_to_density_seconds = time.perf_counter() - t_resize
             print(
-                f"Finished PM/MAS projection for linear summary field in {resize_npart_to_density_seconds:.2f} s.",
+                f"Finished Fourier downsampling for linear summary field in {resize_npart_to_density_seconds:.2f} s.",
                 flush=True,
             )
         elif n_part < density_res:
@@ -380,6 +392,7 @@ def run_lpt_emulator_pipeline(
                 class_cosmo_params=class_params,
                 class_z=float(z_target),
                 class_n_modes=int(class_n_modes),
+                mode_inject_seed=None if mode_inject_seed is None else int(mode_inject_seed),
                 downsample_method=str(downsample_method),
                 downsample_gaussian_sigma_mpc_h=downsample_gaussian_sigma_mpc_h,
                 downsample_threads=int(downsample_threads),
@@ -471,7 +484,7 @@ def run_lpt_emulator_pipeline(
             "downsample_threads": int(downsample_threads),
             "delta_upsample_ratio": delta_upsample_ratio,
             "linear_summary_mapping_method": (
-                "particle_mas_projection" if n_part > density_res else ("resize_density_grid" if n_part < density_res else "identity")
+                "fourier_truncation" if n_part > density_res else ("resize_density_grid" if n_part < density_res else "identity")
             ),
             "n_part": n_part,
             "res": density_res,
@@ -487,6 +500,7 @@ def run_lpt_emulator_pipeline(
             "mas_worder": int(mas_worder),
             "deconvolve_mas": bool(deconvolve_mas),
             "class_n_modes": int(class_n_modes),
+            "mode_inject_seed": None if mode_inject_seed is None else int(mode_inject_seed),
             "resize_input_to_npart_seconds": (
                 None if resize_input_to_npart_seconds is None else float(resize_input_to_npart_seconds)
             ),
@@ -505,14 +519,12 @@ def run_lpt_emulator_pipeline(
         if out_dir is not None and save_outputs:
             z_tag = _z_file_tag(z_target)
             paths = {
-                "ics_grf": out_dir / "ics_grf.npy",
                 "delta_linear": out_dir / f"delta_linear_{z_tag}.npy",
                 "psi_lpt": out_dir / f"dis_lpt_{z_tag}.npy",
                 "delta_lpt": out_dir / f"delta_lpt_{z_tag}.npy",
                 "psi_emu": out_dir / f"emu_dis_{z_tag}.npy",
                 "delta_emu": out_dir / f"emu_delta_{z_tag}.npy",
             }
-            np.save(paths["ics_grf"], np.asarray(ics_grf, dtype=np.float32))
             np.save(paths["delta_linear"], np.asarray(ics_grf, dtype=np.float32))
             np.save(paths["psi_lpt"], np.asarray(psi_lpt, dtype=np.float32))
             np.save(paths["delta_lpt"], np.asarray(delta_lpt, dtype=np.float32))

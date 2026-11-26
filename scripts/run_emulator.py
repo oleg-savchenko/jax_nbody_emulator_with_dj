@@ -5,8 +5,8 @@ End-to-end IC -> emulator -> density pipeline.
 This script:
 1. Uses DISCO-DJ to generate N-GenIC-compatible white noise for a fixed seed.
 2. Builds the corresponding linear Gaussian density field at z=0 (scaled by linear P(k)).
-   If `n_part > res`, this field is projected to the summary grid via PM/MAS deposition
-   (with optional MAS deconvolution), not Gaussian downsampled.
+   If `n_part > res`, this field is downsampled to the summary grid via Fourier truncation
+   (not PM/MAS projection or Gaussian downsampling).
 3. Builds ZA/1LPT displacement at z=0 for fiducial Quijote cosmology.
 4. Runs the pretrained jax_nbody_emulator forward from the initial displacement.
 5. Computes density fields from LPT and emulated displacements (via DISCO-DJ MAS).
@@ -204,7 +204,6 @@ def main() -> None:
 
     if args.plot_only:
         linear_z0_path = out_dir / "delta_linear_z0.npy"
-        ics_grf_path = out_dir / "ics_grf.npy"
         white_noise_path = out_dir / "white_noise_ngenic.npy"
         delta_init_path = out_dir / "delta_lpt_z0.npy"
         delta_emu_path = out_dir / "emu_delta_z0.npy"
@@ -212,14 +211,12 @@ def main() -> None:
 
         if linear_z0_path.is_file():
             ics_grf = np.load(linear_z0_path)
-        elif ics_grf_path.is_file():
-            ics_grf = np.load(ics_grf_path)
         elif white_noise_path.is_file():
             ics_grf = np.load(white_noise_path)
         else:
             raise FileNotFoundError(
                 "Missing IC GRF file for plot-only mode: expected one of "
-                f"{linear_z0_path}, {ics_grf_path}, or {white_noise_path}"
+                f"{linear_z0_path} or {white_noise_path}"
             )
 
         if not delta_init_path.is_file():
@@ -405,7 +402,6 @@ def main() -> None:
             "density_slice_plot": str(slice_plot_path),
             "density_pk_plot": str(pk_plot_path),
             "density_minkowski_plot": str(minkowski_plot_path),
-            "ics_grf_field": saved_paths.get("ics_grf", str(out_dir / "ics_grf.npy")),
             "delta_linear_z0_field": saved_paths.get("delta_linear", str(out_dir / "delta_linear_z0.npy")),
             "delta_linear_z0_npart_field": saved_paths.get("delta_linear_npart"),
             "white_noise_ngenic_field": saved_paths.get("white_noise_ngenic"),
@@ -421,10 +417,7 @@ def main() -> None:
     for idx, rt_hms in enumerate(pipeline["emulator_runtime_hms_by_sim"], start=1):
         print(f"  - sim {idx}: {rt_hms}")
 
-    saved_files = [
-        "ics_grf.npy",
-        "delta_linear_z0.npy",
-    ]
+    saved_files = ["delta_linear_z0.npy"]
     if n_part != density_res:
         saved_files.append("delta_linear_z0_npart.npy")
     if pipeline["white_noise_ngenic"] is not None:

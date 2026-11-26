@@ -555,6 +555,62 @@ def downsample_density_block_average(
     return np.asarray(out, dtype=np.float32)
 
 
+def downsample_density_fourier_truncation(
+    delta_in: np.ndarray,
+    target_res: int,
+    *,
+    method: str = "spherical",
+) -> np.ndarray:
+    """
+    Downsample a periodic cubic field by truncating high-k Fourier modes.
+
+    Adapted from `/home/osavchenko/Pinocchio/my_scripts/filter_field.py`.
+
+    Parameters
+    ----------
+    delta_in
+        Input cubic real-space field.
+    target_res
+        Target grid size per axis (must divide the input size).
+    method
+        `"spherical"` for isotropic k-cut (|k| < k_Nyq(target)) or
+        `"cubic"` for axis-aligned cube crop in shifted FFT space.
+    """
+    delta_in = np.asarray(delta_in, dtype=np.float32)
+    if delta_in.ndim != 3 or not (delta_in.shape[0] == delta_in.shape[1] == delta_in.shape[2]):
+        raise ValueError(f"Input density must be cubic 3D, got shape={delta_in.shape}")
+
+    n_in = int(delta_in.shape[0])
+    n_out = int(target_res)
+    if n_in == n_out:
+        return np.asarray(delta_in, dtype=np.float32)
+    if n_in % n_out != 0:
+        raise ValueError(
+            f"Cannot downsample from {n_in} to {n_out}: input must be an integer multiple."
+        )
+    if method not in {"spherical", "cubic"}:
+        raise ValueError("`method` must be one of: 'spherical', 'cubic'.")
+
+    f = np.fft.fftn(delta_in)
+    f_shift = np.fft.fftshift(f)
+
+    if method == "cubic":
+        start = (n_in - n_out) // 2
+        stop = start + n_out
+        f_crop = np.asarray(f_shift[start:stop, start:stop, start:stop], dtype=np.complex64)
+        out = np.fft.ifftn(np.fft.ifftshift(f_crop)).real * (float(n_out) / float(n_in)) ** 3
+        return np.asarray(out, dtype=np.float32)
+
+    # Spherical cutoff: low-pass on the native grid, then periodic sub-sampling.
+    idx = np.arange(n_in) - n_in // 2
+    nx, ny, nz = np.meshgrid(idx, idx, idx, indexing="ij")
+    mask = (nx * nx + ny * ny + nz * nz) < (n_out / 2.0) ** 2
+    field_smooth = np.fft.ifftn(np.fft.ifftshift(f_shift * mask)).real
+    step = n_in // n_out
+    out = field_smooth[::step, ::step, ::step]
+    return np.asarray(out, dtype=np.float32)
+
+
 def downsample_density_gaussian_pylians(
     delta_in: np.ndarray,
     target_res: int,
@@ -600,14 +656,15 @@ def resize_density_grid(
     class_cosmo_params: dict[str, float] | None = None,
     class_z: float = 0.0,
     class_n_modes: int = 4096,
-    downsample_method: str = "gaussian",
+    mode_inject_seed: int | None = None,
+    downsample_method: str = "fourier_truncation",
     downsample_gaussian_sigma_mpc_h: float | None = None,
     downsample_threads: int = 1,
 ) -> np.ndarray:
     """
     Resize a cubic periodic density field between resolutions.
     Upsampling can use DISCO-DJ interpolation or mode injection.
-    Downsampling defaults to Pylians Gaussian smoothing + block averaging.
+    Downsampling defaults to Fourier truncation.
     """
     in_res = int(np.asarray(delta_in).shape[0])
     if in_res == target_res:
@@ -621,6 +678,7 @@ def resize_density_grid(
                 class_cosmo_params=class_cosmo_params,
                 class_z=float(class_z),
                 class_n_modes=int(class_n_modes),
+                seed=None if mode_inject_seed is None else int(mode_inject_seed),
             )
         if upsample_method not in {"fourier", "linear"}:
             raise ValueError(
@@ -632,6 +690,12 @@ def resize_density_grid(
             target_res=target_res,
             boxsize=boxsize,
             method=upsample_method,
+        )
+    if downsample_method == "fourier_truncation":
+        return downsample_density_fourier_truncation(
+            delta_in=delta_in,
+            target_res=target_res,
+            method="spherical",
         )
     if downsample_method == "gaussian":
         return downsample_density_gaussian_pylians(
@@ -645,7 +709,7 @@ def resize_density_grid(
         return downsample_density_block_average(delta_in=delta_in, target_res=target_res)
     raise ValueError(
         f"Unknown downsample method: {downsample_method!r}. "
-        "Expected one of: 'gaussian', 'block_average'."
+        "Expected one of: 'fourier_truncation', 'gaussian', 'block_average'."
     )
 
 
