@@ -58,7 +58,7 @@ add_import_paths(repo_root=REPO_ROOT)
 try:
     from core import QUIJOTE_FIDUCIAL, run_lpt_emulator_pipeline
 except ImportError as exc:  # pragma: no cover - optional dependency at import time
-    QUIJOTE_FIDUCIAL = {"Omega_m": 0.3175}
+    QUIJOTE_FIDUCIAL = {"Omega_m": 0.3175, "Omega_b": 0.0490, "h": 0.6711, "n_s": 0.9624, "sigma8": 0.8340}
     run_lpt_emulator_pipeline = None
     _CORE_IMPORT_ERROR = exc
 else:
@@ -125,9 +125,12 @@ HOD_DEFAULT_SIGMALOGM = 0.2
 HOD_DEFAULT_LOGM0 = 13.1
 HOD_DEFAULT_ALPHA = 0.75
 HOD_DEFAULT_LOGM1 = 14.3
-HOD_DEFAULT_OMEGA_M = 0.3089
-HOD_DEFAULT_OMEGA_L = 0.6911
-HOD_DEFAULT_H = 0.6774
+# HOD cosmology must match the simulations (flat Quijote fiducial); it was Planck15
+# (Om=0.3089, h=0.6774) before. pyhod only uses Om (satellite NFW r_vir), so older
+# catalogs differ by <1% in satellite radii.
+HOD_DEFAULT_OMEGA_M = float(QUIJOTE_FIDUCIAL["Omega_m"])
+HOD_DEFAULT_OMEGA_L = 1.0 - HOD_DEFAULT_OMEGA_M
+HOD_DEFAULT_H = float(QUIJOTE_FIDUCIAL["h"])
 HOD_DEFAULT_Z = 0.0
 HOD_DEFAULT_M_STAR = 1.670992e13
 HOD_DEFAULT_DELTAC = 200
